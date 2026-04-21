@@ -1776,10 +1776,15 @@ CREATE FUNCTION public.update_company_blocked_status() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
+    IF COALESCE(NEW.manually_unblocked, FALSE) = TRUE THEN
+        NEW.blocked_by_icp := FALSE;
+        RETURN NEW;
+    END IF;
+
     -- Check if icp_score indicates blocking
     IF NEW.icp_score IS NOT NULL THEN
-        IF (NEW.icp_score->>'blocked')::boolean = TRUE OR 
-           (NEW.icp_score->'llm_analysis'->>'blocked')::boolean = TRUE THEN
+        IF COALESCE((NEW.icp_score->>'blocked')::boolean, FALSE) = TRUE OR
+           COALESCE((NEW.icp_score->'llm_analysis'->>'blocked')::boolean, FALSE) = TRUE THEN
             NEW.blocked_by_icp := TRUE;
         ELSE
             NEW.blocked_by_icp := FALSE;
@@ -4801,6 +4806,7 @@ CREATE TABLE public.companies (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     blocked_by_icp boolean DEFAULT false,
+    manually_unblocked boolean DEFAULT false,
     sales_brief jsonb,
     processing_log jsonb,
     deep_research_v2 jsonb,
@@ -14255,4 +14261,3 @@ ALTER EVENT TRIGGER pgrst_drop_watch OWNER TO supabase_admin;
 --
 
 \unrestrict FD5NQNtEOa4zNib21c8d2G5VrXzTRsMrHgOkV059dzT4vwcwfCeCed8DbOsgoeT
-

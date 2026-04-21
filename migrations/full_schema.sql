@@ -1378,10 +1378,15 @@ CREATE OR REPLACE FUNCTION "public"."update_company_blocked_status"() RETURNS "t
     LANGUAGE "plpgsql"
     AS $$
 BEGIN
+    IF COALESCE(NEW.manually_unblocked, FALSE) = TRUE THEN
+        NEW.blocked_by_icp := FALSE;
+        RETURN NEW;
+    END IF;
+
     -- Check if icp_score indicates blocking
     IF NEW.icp_score IS NOT NULL THEN
-        IF (NEW.icp_score->>'blocked')::boolean = TRUE OR 
-           (NEW.icp_score->'llm_analysis'->>'blocked')::boolean = TRUE THEN
+        IF COALESCE((NEW.icp_score->>'blocked')::boolean, FALSE) = TRUE OR
+           COALESCE((NEW.icp_score->'llm_analysis'->>'blocked')::boolean, FALSE) = TRUE THEN
             NEW.blocked_by_icp := TRUE;
         ELSE
             NEW.blocked_by_icp := FALSE;
@@ -2255,6 +2260,7 @@ CREATE TABLE IF NOT EXISTS "public"."companies" (
     "outreach_strategy" "jsonb",
     "b2b_result" "jsonb",
     "blocked_by_icp" boolean DEFAULT false,
+    "manually_unblocked" boolean DEFAULT false,
     "matches_case_study" boolean DEFAULT false,
     "sales_brief" "text",
     "processing_log" "jsonb",
@@ -7845,9 +7851,6 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TAB
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES  TO "anon";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES  TO "authenticated";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES  TO "service_role";
-
-
-
 
 
 
