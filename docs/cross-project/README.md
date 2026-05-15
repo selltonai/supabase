@@ -75,6 +75,15 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 | **style_guidelines** | selltonai-modal | selltonai | Writing style guidelines |
 | **deep_research_settings** | selltonai-modal | selltonai | Research provider settings |
 
+### Onboarding Tables
+
+| Table | Primary Writer | Primary Readers | Purpose |
+|-------|---------------|-----------------|---------|
+| **onboarding_research** | selltonai-modal | selltonai | V1/V2 onboarding research state |
+| **organization_onboarding_events** | selltonai, selltonai-modal | selltonai, backoffice | Funnel transition audit log |
+| **avatar_interviews** | selltonai | selltonai-modal, selltonai | Retell call tracking for onboarding and sender voice |
+| **sender_voice** | selltonai-modal | selltonai | Per-user LinkedIn writing voice distilled from Retell |
+
 ---
 
 ## Schema Contracts
