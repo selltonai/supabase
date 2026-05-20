@@ -149,6 +149,7 @@ CREATE TABLE contacts (
   organization_id text NOT NULL REFERENCES organizations(id),
   email text,
   pipeline_stage text DEFAULT 'prospect',
+  processing_status text DEFAULT 'pending',
   last_reply_sentiment text,
   last_reply_sub_intent text,
   last_reply_at timestamptz,
@@ -158,9 +159,10 @@ CREATE TABLE contacts (
 );
 ```
 
-**Written by**: selltonai-modal (CRUD)  
-**Read by**: selltonai (display), backoffice (oversight)  
+**Written by**: selltonai-modal (CRUD)
+**Read by**: selltonai (display), backoffice (oversight)
 **Unique**: `(organization_id, email)` - one contact per email per org
+**Cleanup status**: `phantom_pending_rediscovery` marks legacy placeholder contacts. These rows are preserved, but selltonai-modal treats them as non-real contacts for AI-Ark enrollment recovery.
 
 ---
 
