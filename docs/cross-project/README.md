@@ -50,6 +50,7 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 | **contacts** | selltonai-modal | selltonai, backoffice | Contact records |
 | **company_contacts** | selltonai-modal | selltonai | Company-contact relationships |
 | **tasks** | selltonai-modal | selltonai, backoffice | Verification tasks |
+| **ai_ark_enrollment_runs** | selltonai-modal | backoffice | Idempotency ledger for AI-Ark enrollment recovery |
 
 ### CRM Tables
 
@@ -66,6 +67,7 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 | **organization_files_chunks** | selltonai-modal | selltonai | Document chunks |
 | **email_accounts** | selltonai-gmail-api | selltonai, modal | Gmail OAuth tokens |
 | **email_tokens** | selltonai-gmail-api | selltonai-modal | Email token tracking |
+| **unmatched_replies** | selltonai-modal | backoffice | Incoming replies that could not be mapped to a contact |
 
 ### ICP & Settings Tables
 
@@ -147,6 +149,9 @@ CREATE TABLE contacts (
   organization_id text NOT NULL REFERENCES organizations(id),
   email text,
   pipeline_stage text DEFAULT 'prospect',
+  last_reply_sentiment text,
+  last_reply_sub_intent text,
+  last_reply_at timestamptz,
   -- ... enrichment fields (JSONB)
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
@@ -156,6 +161,56 @@ CREATE TABLE contacts (
 **Written by**: selltonai-modal (CRUD)  
 **Read by**: selltonai (display), backoffice (oversight)  
 **Unique**: `(organization_id, email)` - one contact per email per org
+
+---
+
+### ai_ark_enrollment_runs
+
+```sql
+CREATE TABLE ai_ark_enrollment_runs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  enrollment_id text NOT NULL,
+  campaign_id uuid NOT NULL REFERENCES campaigns(id),
+  company_id uuid NOT NULL REFERENCES companies(id),
+  organization_id text NOT NULL REFERENCES organizations(id),
+  status text NOT NULL DEFAULT 'running',
+  result_count integer NOT NULL DEFAULT 0,
+  error_message text,
+  run_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+```
+
+**Written by**: selltonai-modal campaign start recovery
+**Read by**: backoffice/support
+**Unique**: `(enrollment_id, company_id)` prevents duplicate AI-Ark searches for the same campaign/company
+
+---
+
+### unmatched_replies
+
+```sql
+CREATE TABLE unmatched_replies (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id text NOT NULL REFERENCES organizations(id),
+  email_id text,
+  thread_id text,
+  account_id text,
+  from_email text,
+  to_emails text[] DEFAULT '{}',
+  raw_payload jsonb DEFAULT '{}',
+  classification_snapshot jsonb DEFAULT '{}',
+  resolution_status text DEFAULT 'unmatched',
+  resolved_contact_id uuid REFERENCES contacts(id),
+  resolved_company_id uuid REFERENCES companies(id),
+  resolved_campaign_id uuid REFERENCES campaigns(id),
+  received_at timestamptz DEFAULT now()
+);
+```
+
+**Written by**: selltonai-modal incoming email webhook
+**Read by**: backoffice/support
+**Unique**: `email_id` when present, so webhook retries do not duplicate persisted orphan replies
 
 ---
 
@@ -226,6 +281,7 @@ supabase/migrations/
 ├── release_1.0.2/
 ├── release_1.0.3/
 ├── release_1.0.4/
+├── release_1.1.1/
 └── next-release/         # Unreleased migrations
     ├── 224_create_crm_tables.sql
     ├── 232_add_crm_list_id_column.sql
@@ -458,6 +514,6 @@ supabase migration down
 
 ---
 
-**Last Updated**: April 6, 2026  
+**Last Updated**: May 20, 2026
 **Maintained By**: Database team, update on schema changes  
 **Purpose**: Shared database contracts for all services
