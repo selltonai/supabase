@@ -69,6 +69,18 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 | **email_tokens** | selltonai-gmail-api | selltonai-modal | Email token tracking |
 | **unmatched_replies** | selltonai-modal | backoffice | Incoming replies that could not be mapped to a contact |
 
+### Billing Tables
+
+| Table | Primary Writer | Primary Readers | Purpose |
+|-------|---------------|-----------------|---------|
+| **billing_customers** | selltonai-modal | selltonai, backoffice | Stripe customer and Xero contact linkage |
+| **billing_invoices** | selltonai-modal | selltonai, backoffice | Stripe invoices, `SLTN-*` invoice numbers, Xero sync state |
+| **billing_xero_tokens** | selltonai-modal | selltonai-modal | Rotated Xero OAuth refresh/access tokens |
+
+`billing_invoices.accounting_breakdown` stores the Xero revenue split for each
+invoice. Its line totals must equal the Stripe-billed total:
+`LLM + DATA + INFRASTRUCTURE = total`.
+
 ### ICP & Settings Tables
 
 | Table | Primary Writer | Primary Readers | Purpose |
