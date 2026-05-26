@@ -58,6 +58,7 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 |-------|---------------|-----------------|---------|
 | **crm_lists** | selltonai-modal | selltonai | CRM import lists |
 | **crm_raw_records** | selltonai-modal | selltonai | Raw CSV data |
+| **crm_import_jobs** | selltonai-modal | selltonai via Modal API | Durable progress for large CRM CSV imports |
 
 ### Document & Email Tables
 
@@ -455,6 +456,19 @@ CSV Upload → Raw records (unknown) → Processing → Extracted
                                                 ↓
                                       Relationships linked
 ```
+
+Large CSV imports also write progress into `crm_import_jobs`:
+
+```
+queued → importing/raw_import → processing/classification
+                                → processing/companies
+                                → processing/contacts
+                                → processing/relationships
+                                → completed
+                                → failed
+```
+
+`selltonai-modal` is the writer for `crm_import_jobs` and exposes progress to `selltonai` through `GET /lists/{list_id}/import-status`.
 
 ---
 
