@@ -67,6 +67,8 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 | **email_accounts** | selltonai-gmail-api | selltonai, modal | Gmail OAuth tokens |
 | **email_tokens** | selltonai-gmail-api | selltonai-modal | Email token tracking |
 
+`organization_files.file_category` values currently include `documents`, `transcripts`, `linkedin_voice`, `internal_documents`, `sales_papers`, `sait_guidelines`, `brand_guidelines`, `case_study`, and `sales_scripts`. New values must be added to the Supabase enum and kept aligned in `selltonai`, `selltonai-modal`, and `selltonai-vector-api`.
+
 ### ICP & Settings Tables
 
 | Table | Primary Writer | Primary Readers | Purpose |

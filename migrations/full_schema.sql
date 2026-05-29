@@ -169,6 +169,7 @@ ALTER TYPE "public"."email_status" OWNER TO "postgres";
 CREATE TYPE "public"."file_category_enum" AS ENUM (
     'documents',
     'transcripts',
+    'linkedin_voice',
     'internal_documents',
     'sales_papers',
     'sait_guidelines',
@@ -3171,7 +3172,7 @@ COMMENT ON TABLE "public"."organization_files" IS 'Stores metadata and full text
 
 
 
-COMMENT ON COLUMN "public"."organization_files"."file_category" IS 'Category of the file: documents, transcripts, internal_documents, sales_papers, sait_guidelines, brand_guidelines, case_study, sales_scripts, images, presentations, spreadsheets, proposals, other';
+COMMENT ON COLUMN "public"."organization_files"."file_category" IS 'Category of the file: documents, transcripts, linkedin_voice, internal_documents, sales_papers, sait_guidelines, brand_guidelines, case_study, sales_scripts, images, presentations, spreadsheets, proposals, other';
 
 
 
@@ -7845,8 +7846,6 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TAB
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES  TO "anon";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES  TO "authenticated";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES  TO "service_role";
-
-
 
 
 
