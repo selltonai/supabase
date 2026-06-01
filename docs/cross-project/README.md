@@ -56,6 +56,7 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 | Table | Primary Writer | Primary Readers | Purpose |
 |-------|---------------|-----------------|---------|
 | **crm_lists** | selltonai-modal | selltonai | CRM import lists |
+| **crm_list_members** | selltonai-modal | selltonai | Manual memberships for existing contacts/companies in CRM lists |
 | **crm_raw_records** | selltonai-modal | selltonai | Raw CSV data |
 
 ### Document & Email Tables
