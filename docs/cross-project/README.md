@@ -57,6 +57,7 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 | Table | Primary Writer | Primary Readers | Purpose |
 |-------|---------------|-----------------|---------|
 | **crm_lists** | selltonai-modal | selltonai | CRM import lists |
+| **crm_list_members** | selltonai-modal | selltonai | Manual memberships for existing contacts/companies in CRM lists |
 | **crm_raw_records** | selltonai-modal | selltonai | Raw CSV data |
 | **crm_import_jobs** | selltonai-modal | selltonai via Modal API | Durable progress for large CRM CSV imports |
 
@@ -70,6 +71,8 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 | **email_tokens** | selltonai-gmail-api | selltonai-modal | Email token tracking |
 | **unmatched_replies** | selltonai-modal | backoffice | Incoming replies that could not be mapped to a contact |
 
+`organization_files.file_category` values currently include `documents`, `transcripts`, `linkedin_voice`, `internal_documents`, `sales_papers`, `sait_guidelines`, `brand_guidelines`, `case_study`, and `sales_scripts`. New values must be added to the Supabase enum and kept aligned in `selltonai`, `selltonai-modal`, and `selltonai-vector-api`.
+
 ### ICP & Settings Tables
 
 | Table | Primary Writer | Primary Readers | Purpose |
@@ -77,6 +80,15 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 | **organization_icp_linkedin_urls** | selltonai-modal | selltonai | ICP URL lists |
 | **style_guidelines** | selltonai-modal | selltonai | Writing style guidelines |
 | **deep_research_settings** | selltonai-modal | selltonai | Research provider settings |
+
+### Onboarding Tables
+
+| Table | Primary Writer | Primary Readers | Purpose |
+|-------|---------------|-----------------|---------|
+| **onboarding_research** | selltonai-modal | selltonai | V1/V2 onboarding research state |
+| **organization_onboarding_events** | selltonai, selltonai-modal | selltonai, backoffice | Funnel transition audit log |
+| **avatar_interviews** | selltonai | selltonai-modal, selltonai | Retell call tracking for onboarding and sender voice |
+| **sender_voice** | selltonai-modal | selltonai | Per-user LinkedIn writing voice distilled from Retell |
 
 ---
 

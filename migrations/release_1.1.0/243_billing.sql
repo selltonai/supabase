@@ -6,9 +6,9 @@
 CREATE TABLE IF NOT EXISTS billing_customers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id TEXT NOT NULL UNIQUE REFERENCES organization(id) ON DELETE CASCADE,
-    stripe_customer_id TEXT NOT NULL UNIQUE,
+    stripe_customer_id TEXT UNIQUE,
     stripe_payment_method_id TEXT,
-    billing_email TEXT NOT NULL,
+    billing_email TEXT,
     billing_name TEXT,
     card_last4 TEXT,
     card_brand TEXT,

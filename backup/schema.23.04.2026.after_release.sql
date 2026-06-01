@@ -169,7 +169,6 @@ ALTER TYPE "public"."email_status" OWNER TO "postgres";
 CREATE TYPE "public"."file_category_enum" AS ENUM (
     'documents',
     'transcripts',
-    'linkedin_voice',
     'internal_documents',
     'sales_papers',
     'sait_guidelines',
@@ -631,6 +630,44 @@ ALTER FUNCTION "public"."get_dashboard_stats"("p_organization_id" "text") OWNER 
 
 COMMENT ON FUNCTION "public"."get_dashboard_stats"("p_organization_id" "text") IS 'Dashboard statistics. Task type counts (reviewDraftTasks, meetingTasks, companyVerificationTasks) now only count PENDING tasks so they sum to pendingTasks total.';
 
+
+
+CREATE OR REPLACE FUNCTION "public"."get_dashboard_stats_simple"("p_org_id" "text") RETURNS "jsonb"
+    LANGUAGE "plpgsql"
+    AS $$
+declare
+  result jsonb;
+begin
+  select jsonb_build_object(
+    'contacts', (
+      select jsonb_build_object(
+        'total', count(*)
+      )
+      from contacts
+      where organization_id = p_org_id
+    ),
+    'companies', (
+      select jsonb_build_object(
+        'total', count(*)
+      )
+      from companies
+      where organization_id = p_org_id
+    ),
+    'tasks', (
+      select jsonb_build_object(
+        'total', count(*)
+      )
+      from tasks
+      where organization_id = p_org_id
+    )
+  ) into result;
+
+  return result;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."get_dashboard_stats_simple"("p_org_id" "text") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."get_organization_summary"("p_organization_id" "text") RETURNS "jsonb"
@@ -1292,6 +1329,19 @@ $$;
 ALTER FUNCTION "public"."remove_deleted_file_from_companies"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."requesting_user_id"() RETURNS "text"
+    LANGUAGE "sql" STABLE
+    AS $$
+  SELECT COALESCE(
+    current_setting('request.jwt.claim.sub', true),
+    (auth.jwt()->>'sub')
+  );
+$$;
+
+
+ALTER FUNCTION "public"."requesting_user_id"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."reset_icp_blocking_for_profile"("profile_id" "uuid") RETURNS integer
     LANGUAGE "plpgsql"
     AS $$
@@ -1340,6 +1390,23 @@ $$;
 ALTER FUNCTION "public"."set_task_priority_rank"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."sync_tasks_assigned_to_user_id"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    AS $$
+    BEGIN
+      IF NEW.assigned_to_user_id IS NULL
+         AND NEW.created_by_user_id IS NOT NULL
+         AND EXISTS (SELECT 1 FROM "user" u WHERE u.id = NEW.created_by_user_id) THEN
+        NEW.assigned_to_user_id := NEW.created_by_user_id;
+      END IF;
+      RETURN NEW;
+    END;
+    $$;
+
+
+ALTER FUNCTION "public"."sync_tasks_assigned_to_user_id"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."update_campaign_companies_updated_at"() RETURNS "trigger"
     LANGUAGE "plpgsql"
     AS $$
@@ -1379,16 +1446,20 @@ CREATE OR REPLACE FUNCTION "public"."update_company_blocked_status"() RETURNS "t
     LANGUAGE "plpgsql"
     AS $$
 BEGIN
-    -- Check if icp_score indicates blocking
+    IF COALESCE(NEW.manually_unblocked, FALSE) = TRUE THEN
+        NEW.blocked_by_icp := FALSE;
+        RETURN NEW;
+    END IF;
+
     IF NEW.icp_score IS NOT NULL THEN
-        IF (NEW.icp_score->>'blocked')::boolean = TRUE OR 
-           (NEW.icp_score->'llm_analysis'->>'blocked')::boolean = TRUE THEN
+        IF COALESCE((NEW.icp_score->>'blocked')::boolean, FALSE) = TRUE OR
+           COALESCE((NEW.icp_score->'llm_analysis'->>'blocked')::boolean, FALSE) = TRUE THEN
             NEW.blocked_by_icp := TRUE;
         ELSE
             NEW.blocked_by_icp := FALSE;
         END IF;
     END IF;
-    
+
     RETURN NEW;
 END;
 $$;
@@ -1408,6 +1479,32 @@ $$;
 
 
 ALTER FUNCTION "public"."update_company_contacts_updated_at"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."update_crm_column_mappings_updated_at"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."update_crm_column_mappings_updated_at"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."update_crm_lists_updated_at"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."update_crm_lists_updated_at"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."update_deep_research_settings_updated_at"() RETURNS "trigger"
@@ -1530,6 +1627,19 @@ $$;
 
 
 ALTER FUNCTION "public"."update_usage_summary"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."update_user_profiles_updated_at"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."update_user_profiles_updated_at"() OWNER TO "postgres";
 
 SET default_tablespace = '';
 
@@ -1697,6 +1807,158 @@ $$;
 ALTER FUNCTION "public"."validate_task_contact"() OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."usage" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "text" NOT NULL,
+    "session_id" "text" NOT NULL,
+    "provider" "text" NOT NULL,
+    "model_name" "text",
+    "api_calls" integer DEFAULT 0,
+    "input_tokens" integer DEFAULT 0,
+    "output_tokens" integer DEFAULT 0,
+    "total_tokens" integer DEFAULT 0,
+    "run_id" "text",
+    "agent_id" "text",
+    "description" "text",
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "tracking_start" timestamp with time zone DEFAULT "now"(),
+    "tracking_end" timestamp with time zone DEFAULT "now"(),
+    "metadata" "jsonb" DEFAULT '{}'::"jsonb",
+    "usage_context" "text" DEFAULT 'direct_api'::"text",
+    "campaign_id" "text",
+    "original_pricing" "jsonb" DEFAULT '{}'::"jsonb",
+    "sellton_pricing" "jsonb" DEFAULT '{}'::"jsonb",
+    "original_cost" numeric(12,6) DEFAULT 0,
+    "sellton_cost" numeric(12,6) DEFAULT 0,
+    "user_id" "text",
+    "invoice_id" "uuid"
+);
+
+
+ALTER TABLE "public"."usage" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."usage" IS 'Universal usage tracking for all APIs and agents - handles both credit-based and token-based systems';
+
+
+
+COMMENT ON COLUMN "public"."usage"."provider" IS 'Service provider: openai, deepseek, exa, b2b_enrichment, perplexity, togetherai, etc.';
+
+
+
+COMMENT ON COLUMN "public"."usage"."model_name" IS 'Actual model name from API response (e.g., gpt-4o, deepseek-chat, exa-search)';
+
+
+
+COMMENT ON COLUMN "public"."usage"."api_calls" IS 'Number of API calls made (primarily for credit-based APIs like Exa, B2B)';
+
+
+
+COMMENT ON COLUMN "public"."usage"."input_tokens" IS 'Input tokens used (for token-based APIs like OpenAI, DeepSeek)';
+
+
+
+COMMENT ON COLUMN "public"."usage"."output_tokens" IS 'Output tokens used (for token-based APIs like OpenAI, DeepSeek)';
+
+
+
+COMMENT ON COLUMN "public"."usage"."total_tokens" IS 'Total tokens (input + output) or calculated equivalent';
+
+
+
+COMMENT ON COLUMN "public"."usage"."usage_context" IS 'Usage context: agent_run, direct_api, batch_processing';
+
+
+
+COMMENT ON COLUMN "public"."usage"."campaign_id" IS 'Campaign ID for tracking usage per campaign (nullable - not all usage is campaign-related)';
+
+
+
+COMMENT ON COLUMN "public"."usage"."original_pricing" IS 'Original provider pricing at time of usage (JSONB with model pricing info)';
+
+
+
+COMMENT ON COLUMN "public"."usage"."sellton_pricing" IS 'Sellton pricing applied at time of usage (JSONB with model pricing info)';
+
+
+
+COMMENT ON COLUMN "public"."usage"."original_cost" IS 'Calculated cost using original provider pricing at time of usage';
+
+
+
+COMMENT ON COLUMN "public"."usage"."sellton_cost" IS 'Calculated cost using Sellton pricing at time of usage';
+
+
+
+CREATE OR REPLACE VIEW "public"."analytics_usage_daily" AS
+ SELECT "usage"."organization_id",
+    "date"("usage"."created_at") AS "usage_date",
+    "usage"."provider",
+    "usage"."model_name",
+    "usage"."campaign_id",
+    "usage"."user_id",
+    "sum"(COALESCE("usage"."input_tokens", 0)) AS "total_input_tokens",
+    "sum"(COALESCE("usage"."output_tokens", 0)) AS "total_output_tokens",
+    "sum"(COALESCE("usage"."total_tokens", 0)) AS "total_tokens",
+    "sum"(COALESCE("usage"."api_calls", 0)) AS "total_api_calls",
+    "sum"(COALESCE("usage"."original_cost", (0)::numeric)) AS "total_original_cost",
+    "sum"(COALESCE("usage"."sellton_cost", (0)::numeric)) AS "total_sellton_cost",
+    "count"(DISTINCT "usage"."session_id") AS "unique_sessions",
+    "count"(*) AS "total_records",
+    "min"("usage"."created_at") AS "first_usage_at",
+    "max"("usage"."created_at") AS "last_usage_at"
+   FROM "public"."usage"
+  WHERE ("usage"."created_at" IS NOT NULL)
+  GROUP BY "usage"."organization_id", ("date"("usage"."created_at")), "usage"."provider", "usage"."model_name", "usage"."campaign_id", "usage"."user_id";
+
+
+ALTER TABLE "public"."analytics_usage_daily" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."billing_customers" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "text" NOT NULL,
+    "stripe_customer_id" "text" NOT NULL,
+    "stripe_payment_method_id" "text",
+    "billing_email" "text" NOT NULL,
+    "billing_name" "text",
+    "card_last4" "text",
+    "card_brand" "text",
+    "plan" "text" DEFAULT 'pay_as_you_go'::"text" NOT NULL,
+    "status" "text" DEFAULT 'active'::"text" NOT NULL,
+    "monthly_spend_limit" numeric(10,2),
+    "auto_charge_enabled" boolean DEFAULT true NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "spend_warning_sent_at" timestamp with time zone,
+    "spend_limit_paused_at" timestamp with time zone,
+    "failed_at" timestamp with time zone
+);
+
+
+ALTER TABLE "public"."billing_customers" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."billing_invoices" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "text" NOT NULL,
+    "stripe_invoice_id" "text",
+    "period_start" timestamp with time zone NOT NULL,
+    "period_end" timestamp with time zone NOT NULL,
+    "line_items" "jsonb" DEFAULT '[]'::"jsonb" NOT NULL,
+    "subtotal" numeric(10,2) DEFAULT 0 NOT NULL,
+    "tax" numeric(10,2) DEFAULT 0 NOT NULL,
+    "total" numeric(10,2) DEFAULT 0 NOT NULL,
+    "status" "text" DEFAULT 'draft'::"text" NOT NULL,
+    "paid_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "stripe_invoice_url" "text"
+);
+
+
+ALTER TABLE "public"."billing_invoices" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."campaign_activities" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "campaign_id" "uuid" NOT NULL,
@@ -1732,7 +1994,8 @@ CREATE TABLE IF NOT EXISTS "public"."campaign_companies" (
     "icp_profile_id_used" "uuid",
     "icp_blocked_at" timestamp with time zone,
     "icp_failed_filters" "jsonb" DEFAULT '[]'::"jsonb",
-    "icp_score_when_blocked" numeric(5,2)
+    "icp_score_when_blocked" numeric(5,2),
+    "processing_status" "text" DEFAULT 'pending'::"text" NOT NULL
 );
 
 
@@ -1756,6 +2019,10 @@ COMMENT ON COLUMN "public"."campaign_companies"."icp_failed_filters" IS 'Array o
 
 
 COMMENT ON COLUMN "public"."campaign_companies"."icp_score_when_blocked" IS 'ICP score at time of blocking (usually 0 for hard filter failures)';
+
+
+
+COMMENT ON COLUMN "public"."campaign_companies"."processing_status" IS 'Processing status: pending, queued, processing, completed, failed';
 
 
 
@@ -1969,6 +2236,7 @@ CREATE TABLE IF NOT EXISTS "public"."campaigns" (
     "daily_fetch_count" integer DEFAULT 0,
     "daily_fetch_date" "date" DEFAULT CURRENT_DATE,
     "campaign_timezone" "text" DEFAULT 'UTC'::"text",
+    "crm_list_id" "text",
     CONSTRAINT "autopilot_min_icp_score_range" CHECK ((("autopilot_min_icp_score" IS NULL) OR (("autopilot_min_icp_score" >= 0) AND ("autopilot_min_icp_score" <= 100)))),
     CONSTRAINT "campaigns_location_type_check" CHECK (("location_type" = ANY (ARRAY['region_based'::"text", 'city_based'::"text"]))),
     CONSTRAINT "check_email_schedule_hour" CHECK ((("email_schedule_hour" >= 0) AND ("email_schedule_hour" <= 23)))
@@ -2222,6 +2490,10 @@ COMMENT ON COLUMN "public"."campaigns"."campaign_timezone" IS 'Timezone for camp
 
 
 
+COMMENT ON COLUMN "public"."campaigns"."crm_list_id" IS 'ID of the CRM list used to create this campaign (if lead_source is crm_list). NULL for csv/lookalike/manual campaigns.';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."companies" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "organization_id" "text" NOT NULL,
@@ -2262,7 +2534,17 @@ CREATE TABLE IF NOT EXISTS "public"."companies" (
     "deep_research_v2" "jsonb",
     "failure_reason" "text",
     "contact_extraction_status" "text" DEFAULT 'extraction_not_started'::"text",
-    CONSTRAINT "companies_processing_status_check" CHECK (("processing_status" = ANY (ARRAY['pending'::"text", 'scheduled'::"text", 'processing'::"text", 'processed'::"text", 'approved'::"text", 'declined'::"text", 'failed'::"text", 'blocked_by_icp'::"text"])))
+    "manually_unblocked" boolean DEFAULT false,
+    "first_outreach_date" timestamp with time zone,
+    "last_outreach_date" timestamp with time zone,
+    "outreach_count" integer DEFAULT 0,
+    "outreach_campaigns" "text"[] DEFAULT '{}'::"text"[],
+    "assigned_to_user_id" "text",
+    "source" "text",
+    "discovery_method" "text",
+    "crm_list_id" "text",
+    "processing_error" "text",
+    CONSTRAINT "companies_processing_status_check" CHECK (("processing_status" = ANY (ARRAY['pending'::"text", 'scheduled'::"text", 'processing'::"text", 'processed'::"text", 'approved'::"text", 'declined'::"text", 'failed'::"text", 'blocked_by_icp'::"text", 'imported'::"text"])))
 );
 
 
@@ -2293,7 +2575,7 @@ COMMENT ON COLUMN "public"."companies"."deep_research" IS 'JSONB object containi
 
 
 
-COMMENT ON COLUMN "public"."companies"."processing_status" IS 'Status of company data processing. Flow: scheduled → processing → processed → (approved OR declined OR blocked_by_icp). Valid values: pending, scheduled, processing, processed, approved, declined, failed, blocked_by_icp';
+COMMENT ON COLUMN "public"."companies"."processing_status" IS 'Status of company data processing. Flow: pending → processing → processed → (approved OR declined OR blocked_by_icp). For CRM imports: imported. Valid values: pending, scheduled, processing, processed, approved, declined, failed, blocked_by_icp, imported';
 
 
 
@@ -2334,6 +2616,38 @@ COMMENT ON COLUMN "public"."companies"."failure_reason" IS 'Stores the reason wh
 
 
 COMMENT ON COLUMN "public"."companies"."contact_extraction_status" IS 'Status of contact extraction: extraction_not_started, extracting_contacts, extraction_complete';
+
+
+
+COMMENT ON COLUMN "public"."companies"."manually_unblocked" IS 'Whether this company was manually unblocked by the user after being blocked by ICP hard filters';
+
+
+
+COMMENT ON COLUMN "public"."companies"."first_outreach_date" IS 'Date when this company was first used for outreach';
+
+
+
+COMMENT ON COLUMN "public"."companies"."last_outreach_date" IS 'Date when this company was last used for outreach';
+
+
+
+COMMENT ON COLUMN "public"."companies"."outreach_count" IS 'Number of times this company has been used for outreach';
+
+
+
+COMMENT ON COLUMN "public"."companies"."outreach_campaigns" IS 'Array of campaign names that have used this company';
+
+
+
+COMMENT ON COLUMN "public"."companies"."source" IS 'Source of company data: campaign, crm_import, manual, api';
+
+
+
+COMMENT ON COLUMN "public"."companies"."discovery_method" IS 'Method used to discover company data: basic_extraction, ai_research, b2b_database, enrichment_api';
+
+
+
+COMMENT ON COLUMN "public"."companies"."crm_list_id" IS 'ID of the CRM list this company was imported from, for filtering and tracking purposes';
 
 
 
@@ -2525,9 +2839,14 @@ CREATE TABLE IF NOT EXISTS "public"."contacts" (
     "email_search_status" "text" DEFAULT 'search_not_started'::"text",
     "do_not_contact" boolean DEFAULT false NOT NULL,
     "sales_brief" "text",
+    "assigned_to_user_id" "text",
+    "source" "text",
+    "discovery_method" "text",
+    "social_profiles" "jsonb" DEFAULT '{}'::"jsonb",
     CONSTRAINT "contacts_email_search_status_check" CHECK (("email_search_status" = ANY (ARRAY['search_not_started'::"text", 'started_searching_email'::"text", 'finished_searching_email'::"text"]))),
     CONSTRAINT "contacts_last_email_sentiment_chk" CHECK ((("last_email_sentiment" IS NULL) OR ("last_email_sentiment" = ANY (ARRAY['VERY_POSITIVE'::"text", 'POSITIVE'::"text", 'NEUTRAL'::"text", 'NEGATIVE'::"text", 'VERY_NEGATIVE'::"text"])))),
-    CONSTRAINT "contacts_pipeline_stage_chk" CHECK ((("pipeline_stage" IS NULL) OR ("pipeline_stage" = ANY (ARRAY['PROSPECT'::"text", 'LEAD'::"text", 'APPOINTMENT_REQUESTED'::"text", 'APPOINTMENT_SCHEDULED'::"text", 'APPOINTMENT_CANCELLED'::"text", 'PRESENTATION_SCHEDULED'::"text", 'CONTRACT_NEGOTIATIONS'::"text", 'AGREEMENT_IN_PRINCIPLE'::"text", 'CLOSED_WON'::"text", 'CLOSED_LOST'::"text", 'REENGAGEMENT'::"text"]))))
+    CONSTRAINT "contacts_pipeline_stage_chk" CHECK ((("pipeline_stage" IS NULL) OR ("pipeline_stage" = ANY (ARRAY['PROSPECT'::"text", 'LEAD'::"text", 'APPOINTMENT_REQUESTED'::"text", 'APPOINTMENT_SCHEDULED'::"text", 'APPOINTMENT_CANCELLED'::"text", 'PRESENTATION_SCHEDULED'::"text", 'CONTRACT_NEGOTIATIONS'::"text", 'AGREEMENT_IN_PRINCIPLE'::"text", 'CLOSED_WON'::"text", 'CLOSED_LOST'::"text", 'REENGAGEMENT'::"text"])))),
+    CONSTRAINT "contacts_processing_status_check" CHECK (("processing_status" = ANY (ARRAY['pending'::"text", 'processing'::"text", 'completed'::"text", 'failed'::"text", 'imported'::"text"])))
 );
 
 
@@ -2594,7 +2913,7 @@ COMMENT ON COLUMN "public"."contacts"."email_validation_response" IS 'Email vali
 
 
 
-COMMENT ON COLUMN "public"."contacts"."processing_status" IS 'Status of contact data processing. Values: pending, processing, completed, failed';
+COMMENT ON COLUMN "public"."contacts"."processing_status" IS 'Status of contact data processing. Values: pending, processing, completed, failed, imported (for CRM imports)';
 
 
 
@@ -2674,6 +2993,18 @@ COMMENT ON COLUMN "public"."contacts"."sales_brief" IS 'Sales brief information 
 
 
 
+COMMENT ON COLUMN "public"."contacts"."source" IS 'Source of contact data: campaign, crm_import, manual, api';
+
+
+
+COMMENT ON COLUMN "public"."contacts"."discovery_method" IS 'Method used to discover contact data: basic_extraction, ai_research, b2b_database, enrichment_api';
+
+
+
+COMMENT ON COLUMN "public"."contacts"."social_profiles" IS 'Social media profiles: {twitter: url, github: url, etc.}';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."conversation_messages" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "conversation_id" "uuid" NOT NULL,
@@ -2745,6 +3076,110 @@ COMMENT ON COLUMN "public"."conversations"."tags" IS 'Array of tags for categori
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."crm_column_mappings" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "text" NOT NULL,
+    "name" "text" DEFAULT 'Default'::"text" NOT NULL,
+    "csv_pattern" "text" NOT NULL,
+    "csv_headers" "text"[] DEFAULT '{}'::"text"[] NOT NULL,
+    "company_mappings" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "contact_mappings" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."crm_column_mappings" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."crm_column_mappings" IS 'Saved CSV-to-DB column mappings for CRM import. csv_pattern is a hash of sorted CSV headers for matching future imports with the same structure.';
+
+
+
+COMMENT ON COLUMN "public"."crm_column_mappings"."csv_pattern" IS 'Hash of sorted CSV headers used to match future imports with the same column structure';
+
+
+
+COMMENT ON COLUMN "public"."crm_column_mappings"."csv_headers" IS 'Original CSV header names in order, for display in the mapper UI';
+
+
+
+COMMENT ON COLUMN "public"."crm_column_mappings"."company_mappings" IS 'Mapping of CSV column names to companies table fields, e.g. {"Company Name": "name", "Website": "website"}';
+
+
+
+COMMENT ON COLUMN "public"."crm_column_mappings"."contact_mappings" IS 'Mapping of CSV column names to contacts table fields, e.g. {"First Name": "firstname", "Email": "email"}';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."crm_lists" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "text" NOT NULL,
+    "name" "text" NOT NULL,
+    "description" "text",
+    "source" "text" NOT NULL,
+    "row_count" integer DEFAULT 0 NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "crm_lists_row_count_check" CHECK (("row_count" >= 0)),
+    CONSTRAINT "crm_lists_source_check" CHECK (("source" = ANY (ARRAY['csv_import'::"text", 'manual'::"text", 'campaign_output'::"text"])))
+);
+
+
+ALTER TABLE "public"."crm_lists" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."crm_lists" IS 'CRM lists for organizing imported data and campaign outputs';
+
+
+
+COMMENT ON COLUMN "public"."crm_lists"."source" IS 'Source of the list: csv_import, manual, or campaign_output';
+
+
+
+COMMENT ON COLUMN "public"."crm_lists"."row_count" IS 'Denormalized count of records in the list, updated on import';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."crm_raw_records" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "list_id" "uuid" NOT NULL,
+    "organization_id" "text" NOT NULL,
+    "raw_data" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "record_type" "text" DEFAULT 'unknown'::"text" NOT NULL,
+    "extracted_company_id" "uuid",
+    "extracted_person_id" "uuid",
+    "import_status" "text" DEFAULT 'raw'::"text" NOT NULL,
+    "import_error" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "crm_raw_records_import_status_check" CHECK (("import_status" = ANY (ARRAY['raw'::"text", 'extracted'::"text", 'failed'::"text"]))),
+    CONSTRAINT "crm_raw_records_record_type_check" CHECK (("record_type" = ANY (ARRAY['company'::"text", 'person'::"text", 'unknown'::"text"])))
+);
+
+
+ALTER TABLE "public"."crm_raw_records" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."crm_raw_records" IS 'Raw imported data before extraction and processing';
+
+
+
+COMMENT ON COLUMN "public"."crm_raw_records"."raw_data" IS 'Original CSV row as JSON object, never transformed at import time';
+
+
+
+COMMENT ON COLUMN "public"."crm_raw_records"."record_type" IS 'Type after extraction: company, person, or unknown';
+
+
+
+COMMENT ON COLUMN "public"."crm_raw_records"."import_status" IS 'Processing status: raw, extracted, or failed';
+
+
+
+COMMENT ON COLUMN "public"."crm_raw_records"."import_error" IS 'Error message if extraction failed';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."token_usage" (
     "id" bigint NOT NULL,
     "organization_id" "text" NOT NULL,
@@ -2770,7 +3205,8 @@ CREATE TABLE IF NOT EXISTS "public"."token_usage" (
     "total_reasoning_tokens" integer DEFAULT 0,
     "total_prompt_tokens" integer DEFAULT 0,
     "total_completion_tokens" integer DEFAULT 0,
-    "total_processing_time" numeric DEFAULT 0
+    "total_processing_time" numeric DEFAULT 0,
+    "user_id" "text"
 );
 
 
@@ -2792,87 +3228,6 @@ CREATE OR REPLACE VIEW "public"."daily_token_usage" AS
 
 
 ALTER TABLE "public"."daily_token_usage" OWNER TO "postgres";
-
-
-CREATE TABLE IF NOT EXISTS "public"."usage" (
-    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
-    "organization_id" "text" NOT NULL,
-    "session_id" "text" NOT NULL,
-    "provider" "text" NOT NULL,
-    "model_name" "text",
-    "api_calls" integer DEFAULT 0,
-    "input_tokens" integer DEFAULT 0,
-    "output_tokens" integer DEFAULT 0,
-    "total_tokens" integer DEFAULT 0,
-    "run_id" "text",
-    "agent_id" "text",
-    "description" "text",
-    "created_at" timestamp with time zone DEFAULT "now"(),
-    "tracking_start" timestamp with time zone DEFAULT "now"(),
-    "tracking_end" timestamp with time zone DEFAULT "now"(),
-    "metadata" "jsonb" DEFAULT '{}'::"jsonb",
-    "usage_context" "text" DEFAULT 'direct_api'::"text",
-    "campaign_id" "text",
-    "original_pricing" "jsonb" DEFAULT '{}'::"jsonb",
-    "sellton_pricing" "jsonb" DEFAULT '{}'::"jsonb",
-    "original_cost" numeric(12,6) DEFAULT 0,
-    "sellton_cost" numeric(12,6) DEFAULT 0
-);
-
-
-ALTER TABLE "public"."usage" OWNER TO "postgres";
-
-
-COMMENT ON TABLE "public"."usage" IS 'Universal usage tracking for all APIs and agents - handles both credit-based and token-based systems';
-
-
-
-COMMENT ON COLUMN "public"."usage"."provider" IS 'Service provider: openai, deepseek, exa, b2b_enrichment, perplexity, togetherai, etc.';
-
-
-
-COMMENT ON COLUMN "public"."usage"."model_name" IS 'Actual model name from API response (e.g., gpt-4o, deepseek-chat, exa-search)';
-
-
-
-COMMENT ON COLUMN "public"."usage"."api_calls" IS 'Number of API calls made (primarily for credit-based APIs like Exa, B2B)';
-
-
-
-COMMENT ON COLUMN "public"."usage"."input_tokens" IS 'Input tokens used (for token-based APIs like OpenAI, DeepSeek)';
-
-
-
-COMMENT ON COLUMN "public"."usage"."output_tokens" IS 'Output tokens used (for token-based APIs like OpenAI, DeepSeek)';
-
-
-
-COMMENT ON COLUMN "public"."usage"."total_tokens" IS 'Total tokens (input + output) or calculated equivalent';
-
-
-
-COMMENT ON COLUMN "public"."usage"."usage_context" IS 'Usage context: agent_run, direct_api, batch_processing';
-
-
-
-COMMENT ON COLUMN "public"."usage"."campaign_id" IS 'Campaign ID for tracking usage per campaign (nullable - not all usage is campaign-related)';
-
-
-
-COMMENT ON COLUMN "public"."usage"."original_pricing" IS 'Original provider pricing at time of usage (JSONB with model pricing info)';
-
-
-
-COMMENT ON COLUMN "public"."usage"."sellton_pricing" IS 'Sellton pricing applied at time of usage (JSONB with model pricing info)';
-
-
-
-COMMENT ON COLUMN "public"."usage"."original_cost" IS 'Calculated cost using original provider pricing at time of usage';
-
-
-
-COMMENT ON COLUMN "public"."usage"."sellton_cost" IS 'Calculated cost using Sellton pricing at time of usage';
-
 
 
 CREATE OR REPLACE VIEW "public"."daily_usage_stats" AS
@@ -3124,6 +3479,56 @@ ALTER SEQUENCE "public"."interviewer_id_seq" OWNED BY "public"."interviewer"."id
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."invitation_metadata" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "invitation_id" "text" NOT NULL,
+    "organization_id" "text" NOT NULL,
+    "email_address" "text" NOT NULL,
+    "first_name" "text",
+    "last_name" "text",
+    "role" "text" DEFAULT 'org:member'::"text" NOT NULL,
+    "position" "text",
+    "phone_number" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."invitation_metadata" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."notifications" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "text" NOT NULL,
+    "user_id" "text" NOT NULL,
+    "type" "text" NOT NULL,
+    "title" "text" NOT NULL,
+    "body" "text",
+    "action_url" "text",
+    "entity_type" "text",
+    "entity_id" "text",
+    "metadata" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "channels" "text"[] DEFAULT ARRAY['in_app'::"text"] NOT NULL,
+    "priority" "text" DEFAULT 'normal'::"text" NOT NULL,
+    "email_sent" boolean DEFAULT false NOT NULL,
+    "email_sent_at" timestamp with time zone,
+    "email_error" "text",
+    "resend_message_id" "text",
+    "read" boolean DEFAULT false NOT NULL,
+    "read_at" timestamp with time zone,
+    "dismissed" boolean DEFAULT false NOT NULL,
+    "dedup_key" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "email_delivery_status" "text",
+    "email_last_event_at" timestamp with time zone,
+    "email_provider_event" "jsonb",
+    CONSTRAINT "notifications_priority_check" CHECK (("priority" = ANY (ARRAY['low'::"text", 'normal'::"text", 'high'::"text", 'urgent'::"text"]))),
+    CONSTRAINT "notifications_type_check" CHECK (("type" = ANY (ARRAY['task_assigned'::"text", 'task_due'::"text", 'contact_replied'::"text", 'campaign_alert'::"text", 'campaign_completed'::"text", 'budget_warning'::"text", 'budget_critical'::"text", 'daily_briefing'::"text", 'weekly_report'::"text", 'approval_needed'::"text", 'system_alert'::"text"])))
+);
+
+
+ALTER TABLE "public"."notifications" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."organization" (
     "id" "text" NOT NULL,
     "created_at" timestamp with time zone DEFAULT "timezone"('utc'::"text", "now"()),
@@ -3172,7 +3577,7 @@ COMMENT ON TABLE "public"."organization_files" IS 'Stores metadata and full text
 
 
 
-COMMENT ON COLUMN "public"."organization_files"."file_category" IS 'Category of the file: documents, transcripts, linkedin_voice, internal_documents, sales_papers, sait_guidelines, brand_guidelines, case_study, sales_scripts, images, presentations, spreadsheets, proposals, other';
+COMMENT ON COLUMN "public"."organization_files"."file_category" IS 'Category of the file: documents, transcripts, internal_documents, sales_papers, sait_guidelines, brand_guidelines, case_study, sales_scripts, images, presentations, spreadsheets, proposals, other';
 
 
 
@@ -3427,6 +3832,7 @@ CREATE TABLE IF NOT EXISTS "public"."tasks" (
     "conversation_summary" "jsonb" DEFAULT '{}'::"jsonb",
     "conversation_summary_text" "text",
     "feedback" "text",
+    "assigned_to_user_id" "text",
     CONSTRAINT "tasks_feedback_check" CHECK ((("feedback" IS NULL) OR ("feedback" = ANY (ARRAY['liked'::"text", 'disliked'::"text"])))),
     CONSTRAINT "tasks_priority_check" CHECK ((("priority" IS NULL) OR ("priority" = ANY (ARRAY['low'::"text", 'normal'::"text", 'high'::"text", 'urgent'::"text"])))),
     CONSTRAINT "tasks_send_status_check" CHECK ((("send_status" IS NULL) OR ("send_status" = ANY (ARRAY['not_sent'::"text", 'sending'::"text", 'sent_success'::"text", 'sent_failed'::"text"])))),
@@ -3859,7 +4265,8 @@ CREATE TABLE IF NOT EXISTS "public"."usage_summary" (
     "total_tokens" integer DEFAULT 0,
     "unique_sessions" integer DEFAULT 0,
     "created_at" timestamp with time zone DEFAULT "now"(),
-    "updated_at" timestamp with time zone DEFAULT "now"()
+    "updated_at" timestamp with time zone DEFAULT "now"(),
+    "user_id" "text"
 );
 
 
@@ -3897,7 +4304,8 @@ ALTER TABLE "public"."user" OWNER TO "postgres";
 
 CREATE TABLE IF NOT EXISTS "public"."user_organizations" (
     "user_id" "text" NOT NULL,
-    "organization_id" "text" NOT NULL
+    "organization_id" "text" NOT NULL,
+    "role" "text" DEFAULT 'org:member'::"text"
 );
 
 
@@ -3906,6 +4314,37 @@ ALTER TABLE "public"."user_organizations" OWNER TO "postgres";
 
 COMMENT ON TABLE "public"."user_organizations" IS 'Links users to their organizations. Fixed by migration 70 to ensure all users have proper associations.';
 
+
+
+CREATE TABLE IF NOT EXISTS "public"."user_profiles" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "user_id" "text" NOT NULL,
+    "organization_id" "text" NOT NULL,
+    "display_name" "text",
+    "position" "text",
+    "avatar_url" "text",
+    "phone_personal" "text",
+    "timezone" "text" DEFAULT 'UTC'::"text",
+    "region" "text",
+    "language" "text" DEFAULT 'en'::"text",
+    "notification_preferences" "jsonb" DEFAULT '{"weekly_report": true, "daily_briefing": true, "campaign_alerts": true, "email_reminders": true, "task_notifications": true}'::"jsonb",
+    "email_account_ids" "text"[] DEFAULT '{}'::"text"[],
+    "calendar_provider" "text",
+    "calendar_credentials" "jsonb",
+    "linkedin_account_id" "text",
+    "whatsapp_account_id" "text",
+    "assigned_phone_numbers" "text"[] DEFAULT '{}'::"text"[],
+    "daily_send_limit" integer DEFAULT 50,
+    "can_purchase" boolean DEFAULT false,
+    "autopilot_enabled" boolean DEFAULT true,
+    "onboarding_completed" boolean DEFAULT false,
+    "last_active_at" timestamp without time zone,
+    "created_at" timestamp without time zone DEFAULT "now"(),
+    "updated_at" timestamp without time zone DEFAULT "now"()
+);
+
+
+ALTER TABLE "public"."user_profiles" OWNER TO "postgres";
 
 
 ALTER TABLE ONLY "public"."feedback" ALTER COLUMN "id" SET DEFAULT "nextval"('"public"."feedback_id_seq"'::"regclass");
@@ -3925,6 +4364,31 @@ ALTER TABLE ONLY "public"."style_guidelines" ALTER COLUMN "id" SET DEFAULT "next
 
 
 ALTER TABLE ONLY "public"."token_usage" ALTER COLUMN "id" SET DEFAULT "nextval"('"public"."token_usage_id_seq"'::"regclass");
+
+
+
+ALTER TABLE ONLY "public"."billing_customers"
+    ADD CONSTRAINT "billing_customers_organization_id_key" UNIQUE ("organization_id");
+
+
+
+ALTER TABLE ONLY "public"."billing_customers"
+    ADD CONSTRAINT "billing_customers_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."billing_customers"
+    ADD CONSTRAINT "billing_customers_stripe_customer_id_key" UNIQUE ("stripe_customer_id");
+
+
+
+ALTER TABLE ONLY "public"."billing_invoices"
+    ADD CONSTRAINT "billing_invoices_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."billing_invoices"
+    ADD CONSTRAINT "billing_invoices_stripe_invoice_id_key" UNIQUE ("stripe_invoice_id");
 
 
 
@@ -4033,6 +4497,21 @@ ALTER TABLE ONLY "public"."conversations"
 
 
 
+ALTER TABLE ONLY "public"."crm_column_mappings"
+    ADD CONSTRAINT "crm_column_mappings_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."crm_lists"
+    ADD CONSTRAINT "crm_lists_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."crm_raw_records"
+    ADD CONSTRAINT "crm_raw_records_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."document_access_events"
     ADD CONSTRAINT "document_access_events_pkey" PRIMARY KEY ("id");
 
@@ -4070,6 +4549,21 @@ ALTER TABLE ONLY "public"."interview"
 
 ALTER TABLE ONLY "public"."interviewer"
     ADD CONSTRAINT "interviewer_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."invitation_metadata"
+    ADD CONSTRAINT "invitation_metadata_invitation_id_key" UNIQUE ("invitation_id");
+
+
+
+ALTER TABLE ONLY "public"."invitation_metadata"
+    ADD CONSTRAINT "invitation_metadata_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."notifications"
+    ADD CONSTRAINT "notifications_pkey" PRIMARY KEY ("id");
 
 
 
@@ -4138,6 +4632,11 @@ ALTER TABLE ONLY "public"."token_usage"
 
 
 
+ALTER TABLE ONLY "public"."billing_invoices"
+    ADD CONSTRAINT "uq_billing_invoices_org_period" UNIQUE ("organization_id", "period_start", "period_end");
+
+
+
 ALTER TABLE ONLY "public"."usage"
     ADD CONSTRAINT "usage_pkey" PRIMARY KEY ("id");
 
@@ -4163,6 +4662,16 @@ ALTER TABLE ONLY "public"."user"
 
 
 
+ALTER TABLE ONLY "public"."user_profiles"
+    ADD CONSTRAINT "user_profiles_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."user_profiles"
+    ADD CONSTRAINT "user_profiles_user_id_organization_id_key" UNIQUE ("user_id", "organization_id");
+
+
+
 CREATE INDEX "feedback_organization_id_idx" ON "public"."feedback" USING "btree" ("organization_id");
 
 
@@ -4184,6 +4693,22 @@ CREATE INDEX "idx_access_events_org" ON "public"."document_access_events" USING 
 
 
 CREATE INDEX "idx_access_events_short_url" ON "public"."document_access_events" USING "btree" ("short_url_id");
+
+
+
+CREATE INDEX "idx_billing_customers_org" ON "public"."billing_customers" USING "btree" ("organization_id");
+
+
+
+CREATE INDEX "idx_billing_invoices_org" ON "public"."billing_invoices" USING "btree" ("organization_id", "created_at" DESC);
+
+
+
+CREATE INDEX "idx_billing_invoices_status" ON "public"."billing_invoices" USING "btree" ("status");
+
+
+
+CREATE INDEX "idx_billing_invoices_stripe_id" ON "public"."billing_invoices" USING "btree" ("stripe_invoice_id") WHERE ("stripe_invoice_id" IS NOT NULL);
 
 
 
@@ -4223,6 +4748,10 @@ CREATE INDEX "idx_campaign_companies_campaign_id" ON "public"."campaign_companie
 
 
 
+CREATE INDEX "idx_campaign_companies_campaign_status" ON "public"."campaign_companies" USING "btree" ("campaign_id", "processing_status");
+
+
+
 CREATE INDEX "idx_campaign_companies_company_id" ON "public"."campaign_companies" USING "btree" ("company_id");
 
 
@@ -4235,7 +4764,15 @@ CREATE INDEX "idx_campaign_companies_org_campaign" ON "public"."campaign_compani
 
 
 
+COMMENT ON INDEX "public"."idx_campaign_companies_org_campaign" IS 'Index for campaign company queries by organization';
+
+
+
 CREATE INDEX "idx_campaign_companies_organization_id" ON "public"."campaign_companies" USING "btree" ("organization_id");
+
+
+
+CREATE INDEX "idx_campaign_companies_processing_status" ON "public"."campaign_companies" USING "btree" ("processing_status");
 
 
 
@@ -4336,6 +4873,10 @@ CREATE INDEX "idx_campaigns_b2b_total_elements" ON "public"."campaigns" USING "b
 
 
 CREATE INDEX "idx_campaigns_created_at" ON "public"."campaigns" USING "btree" ("created_at");
+
+
+
+CREATE INDEX "idx_campaigns_crm_list_id" ON "public"."campaigns" USING "btree" ("crm_list_id") WHERE ("crm_list_id" IS NOT NULL);
 
 
 
@@ -4467,6 +5008,18 @@ CREATE INDEX "idx_campaigns_wizard_completed" ON "public"."campaigns" USING "btr
 
 
 
+CREATE INDEX "idx_companies_assigned" ON "public"."companies" USING "btree" ("assigned_to_user_id") WHERE ("assigned_to_user_id" IS NOT NULL);
+
+
+
+CREATE INDEX "idx_companies_assigned_to" ON "public"."companies" USING "btree" ("assigned_to_user_id") WHERE ("assigned_to_user_id" IS NOT NULL);
+
+
+
+CREATE INDEX "idx_companies_assigned_to_user_id" ON "public"."companies" USING "btree" ("assigned_to_user_id");
+
+
+
 CREATE INDEX "idx_companies_b2b_result" ON "public"."companies" USING "gin" ("b2b_result");
 
 
@@ -4487,6 +5040,10 @@ CREATE INDEX "idx_companies_created_at" ON "public"."companies" USING "btree" ("
 
 
 
+CREATE INDEX "idx_companies_crm_list_id" ON "public"."companies" USING "btree" ("crm_list_id") WHERE ("crm_list_id" IS NOT NULL);
+
+
+
 CREATE INDEX "idx_companies_deep_research_gin" ON "public"."companies" USING "gin" ("deep_research");
 
 
@@ -4495,11 +5052,19 @@ CREATE INDEX "idx_companies_deep_research_v2" ON "public"."companies" USING "gin
 
 
 
+CREATE INDEX "idx_companies_discovery_method" ON "public"."companies" USING "btree" ("discovery_method");
+
+
+
 CREATE INDEX "idx_companies_employee_count" ON "public"."companies" USING "btree" ("employee_count");
 
 
 
 CREATE INDEX "idx_companies_failed_reason" ON "public"."companies" USING "btree" ("organization_id", "processing_status", "failure_reason") WHERE ("processing_status" = 'failed'::"text");
+
+
+
+CREATE INDEX "idx_companies_first_outreach_date" ON "public"."companies" USING "btree" ("first_outreach_date");
 
 
 
@@ -4547,7 +5112,7 @@ CREATE INDEX "idx_companies_org_status" ON "public"."companies" USING "btree" ("
 
 
 
-COMMENT ON INDEX "public"."idx_companies_org_status" IS 'Optimizes cron job queries filtering by organization and processing status';
+COMMENT ON INDEX "public"."idx_companies_org_status" IS 'Index for company status queries by organization';
 
 
 
@@ -4556,6 +5121,10 @@ CREATE INDEX "idx_companies_org_updated" ON "public"."companies" USING "btree" (
 
 
 CREATE INDEX "idx_companies_organization_id" ON "public"."companies" USING "btree" ("organization_id");
+
+
+
+CREATE INDEX "idx_companies_outreach_count" ON "public"."companies" USING "btree" ("outreach_count");
 
 
 
@@ -4571,11 +5140,15 @@ CREATE INDEX "idx_companies_processing_status" ON "public"."companies" USING "bt
 
 
 
-CREATE INDEX "idx_companies_sales_brief" ON "public"."companies" USING "btree" ("sales_brief") WHERE ("sales_brief" IS NOT NULL);
+CREATE INDEX "idx_companies_sales_brief_hash" ON "public"."companies" USING "hash" ("md5"("sales_brief"));
 
 
 
 CREATE INDEX "idx_companies_search_gin" ON "public"."companies" USING "gin" ("name" "public"."gin_trgm_ops", "location" "public"."gin_trgm_ops", "description" "public"."gin_trgm_ops");
+
+
+
+CREATE INDEX "idx_companies_source" ON "public"."companies" USING "btree" ("source");
 
 
 
@@ -4699,6 +5272,18 @@ CREATE INDEX "idx_contacts_analysis_gin" ON "public"."contacts" USING "gin" ("an
 
 
 
+CREATE INDEX "idx_contacts_assigned" ON "public"."contacts" USING "btree" ("assigned_to_user_id") WHERE ("assigned_to_user_id" IS NOT NULL);
+
+
+
+CREATE INDEX "idx_contacts_assigned_to" ON "public"."contacts" USING "btree" ("assigned_to_user_id") WHERE ("assigned_to_user_id" IS NOT NULL);
+
+
+
+CREATE INDEX "idx_contacts_assigned_to_user_id" ON "public"."contacts" USING "btree" ("assigned_to_user_id");
+
+
+
 CREATE INDEX "idx_contacts_b2b_email_requested" ON "public"."contacts" USING "btree" ("organization_id", "b2b_email_requested") WHERE ("b2b_email_requested" = false);
 
 
@@ -4708,6 +5293,10 @@ CREATE INDEX "idx_contacts_certifications_gin" ON "public"."contacts" USING "gin
 
 
 CREATE INDEX "idx_contacts_created_at" ON "public"."contacts" USING "btree" ("created_at");
+
+
+
+CREATE INDEX "idx_contacts_discovery_method" ON "public"."contacts" USING "btree" ("discovery_method");
 
 
 
@@ -4799,7 +5388,7 @@ CREATE INDEX "idx_contacts_provider_responses" ON "public"."contacts" USING "gin
 
 
 
-CREATE INDEX "idx_contacts_sales_brief" ON "public"."contacts" USING "btree" ("sales_brief") WHERE ("sales_brief" IS NOT NULL);
+CREATE INDEX "idx_contacts_sales_brief_hash" ON "public"."contacts" USING "hash" ("md5"("sales_brief"));
 
 
 
@@ -4808,6 +5397,10 @@ CREATE INDEX "idx_contacts_search_gin" ON "public"."contacts" USING "gin" ("name
 
 
 CREATE INDEX "idx_contacts_skills_gin" ON "public"."contacts" USING "gin" ("skills");
+
+
+
+CREATE INDEX "idx_contacts_source" ON "public"."contacts" USING "btree" ("source");
 
 
 
@@ -4855,6 +5448,50 @@ CREATE INDEX "idx_conversations_status" ON "public"."conversations" USING "btree
 
 
 
+CREATE INDEX "idx_crm_column_mappings_org_id" ON "public"."crm_column_mappings" USING "btree" ("organization_id");
+
+
+
+CREATE INDEX "idx_crm_column_mappings_org_pattern" ON "public"."crm_column_mappings" USING "btree" ("organization_id", "csv_pattern");
+
+
+
+CREATE INDEX "idx_crm_lists_created_at" ON "public"."crm_lists" USING "btree" ("created_at");
+
+
+
+CREATE INDEX "idx_crm_lists_org_id" ON "public"."crm_lists" USING "btree" ("organization_id");
+
+
+
+CREATE INDEX "idx_crm_lists_source" ON "public"."crm_lists" USING "btree" ("source");
+
+
+
+CREATE INDEX "idx_crm_raw_records_extracted_company_id" ON "public"."crm_raw_records" USING "btree" ("extracted_company_id") WHERE ("extracted_company_id" IS NOT NULL);
+
+
+
+CREATE INDEX "idx_crm_raw_records_extracted_person_id" ON "public"."crm_raw_records" USING "btree" ("extracted_person_id") WHERE ("extracted_person_id" IS NOT NULL);
+
+
+
+CREATE INDEX "idx_crm_raw_records_import_status" ON "public"."crm_raw_records" USING "btree" ("import_status");
+
+
+
+CREATE INDEX "idx_crm_raw_records_list_id" ON "public"."crm_raw_records" USING "btree" ("list_id");
+
+
+
+CREATE INDEX "idx_crm_raw_records_org_id" ON "public"."crm_raw_records" USING "btree" ("organization_id");
+
+
+
+CREATE INDEX "idx_crm_raw_records_record_type" ON "public"."crm_raw_records" USING "btree" ("record_type");
+
+
+
 CREATE INDEX "idx_icp_linkedin_org_type" ON "public"."organization_icp_linkedin_urls" USING "btree" ("organization_id", "url_type");
 
 
@@ -4876,6 +5513,46 @@ CREATE INDEX "idx_icp_profiles_organization_id" ON "public"."icp_profiles" USING
 
 
 CREATE INDEX "idx_interviewer_org_id" ON "public"."interviewer" USING "btree" ("organization_id");
+
+
+
+CREATE INDEX "idx_invitation_metadata_org_email" ON "public"."invitation_metadata" USING "btree" ("organization_id", "email_address");
+
+
+
+CREATE INDEX "idx_notifications_channels_gin" ON "public"."notifications" USING "gin" ("channels");
+
+
+
+CREATE INDEX "idx_notifications_created_at" ON "public"."notifications" USING "btree" ("created_at");
+
+
+
+CREATE INDEX "idx_notifications_email_delivery_status" ON "public"."notifications" USING "btree" ("email_delivery_status") WHERE ("email_delivery_status" IS NOT NULL);
+
+
+
+CREATE INDEX "idx_notifications_entity_lookup" ON "public"."notifications" USING "btree" ("organization_id", "entity_type", "entity_id", "created_at" DESC) WHERE ("entity_id" IS NOT NULL);
+
+
+
+CREATE INDEX "idx_notifications_org_created_at" ON "public"."notifications" USING "btree" ("organization_id", "created_at" DESC);
+
+
+
+CREATE INDEX "idx_notifications_resend_message_id" ON "public"."notifications" USING "btree" ("resend_message_id") WHERE ("resend_message_id" IS NOT NULL);
+
+
+
+CREATE UNIQUE INDEX "idx_notifications_user_dedup_key" ON "public"."notifications" USING "btree" ("user_id", "dedup_key") WHERE ("dedup_key" IS NOT NULL);
+
+
+
+CREATE INDEX "idx_notifications_user_unread_count" ON "public"."notifications" USING "btree" ("user_id", "organization_id") WHERE (("read" = false) AND ("dismissed" = false));
+
+
+
+CREATE INDEX "idx_notifications_user_unread_list" ON "public"."notifications" USING "btree" ("user_id", "organization_id", "created_at" DESC) WHERE (("read" = false) AND ("dismissed" = false));
 
 
 
@@ -4971,6 +5648,18 @@ CREATE INDEX "idx_system_config_key" ON "public"."system_config" USING "btree" (
 
 
 
+CREATE INDEX "idx_tasks_assigned" ON "public"."tasks" USING "btree" ("assigned_to_user_id") WHERE ("assigned_to_user_id" IS NOT NULL);
+
+
+
+CREATE INDEX "idx_tasks_assigned_to" ON "public"."tasks" USING "btree" ("assigned_to_user_id") WHERE ("assigned_to_user_id" IS NOT NULL);
+
+
+
+CREATE INDEX "idx_tasks_assigned_to_user_id" ON "public"."tasks" USING "btree" ("assigned_to_user_id");
+
+
+
 CREATE INDEX "idx_tasks_campaign_id" ON "public"."tasks" USING "btree" ("campaign_id");
 
 
@@ -5043,7 +5732,7 @@ CREATE INDEX "idx_tasks_org_status" ON "public"."tasks" USING "btree" ("organiza
 
 
 
-COMMENT ON INDEX "public"."idx_tasks_org_status" IS 'Optimizes task queries filtering by organization and status';
+COMMENT ON INDEX "public"."idx_tasks_org_status" IS 'Index for task status queries by organization';
 
 
 
@@ -5056,6 +5745,10 @@ CREATE INDEX "idx_tasks_org_status_priority_created" ON "public"."tasks" USING "
 
 
 CREATE INDEX "idx_tasks_org_type_status" ON "public"."tasks" USING "btree" ("organization_id", "task_type", "status");
+
+
+
+COMMENT ON INDEX "public"."idx_tasks_org_type_status" IS 'Index for task type and status queries by organization';
 
 
 
@@ -5135,6 +5828,10 @@ CREATE INDEX "idx_token_usage_provider" ON "public"."token_usage" USING "btree" 
 
 
 
+CREATE INDEX "idx_token_usage_user" ON "public"."token_usage" USING "btree" ("user_id") WHERE ("user_id" IS NOT NULL);
+
+
+
 CREATE INDEX "idx_usage_campaign_id" ON "public"."usage" USING "btree" ("campaign_id");
 
 
@@ -5155,6 +5852,10 @@ CREATE INDEX "idx_usage_created_at_date" ON "public"."usage" USING "btree" ("org
 
 
 
+CREATE INDEX "idx_usage_invoice_id" ON "public"."usage" USING "btree" ("invoice_id");
+
+
+
 CREATE INDEX "idx_usage_org_campaign" ON "public"."usage" USING "btree" ("organization_id", "campaign_id") WHERE ("campaign_id" IS NOT NULL);
 
 
@@ -5172,6 +5873,10 @@ COMMENT ON INDEX "public"."idx_usage_org_created" IS 'Optimizes usage analytics 
 
 
 CREATE INDEX "idx_usage_org_created_desc" ON "public"."usage" USING "btree" ("organization_id", "created_at" DESC);
+
+
+
+CREATE INDEX "idx_usage_org_period" ON "public"."usage" USING "btree" ("organization_id", "created_at" DESC);
 
 
 
@@ -5199,11 +5904,35 @@ CREATE INDEX "idx_usage_summary_provider" ON "public"."usage_summary" USING "btr
 
 
 
+CREATE INDEX "idx_usage_user" ON "public"."usage" USING "btree" ("user_id") WHERE ("user_id" IS NOT NULL);
+
+
+
+CREATE INDEX "idx_usage_user_id" ON "public"."usage" USING "btree" ("user_id") WHERE ("user_id" IS NOT NULL);
+
+
+
+CREATE INDEX "idx_user_organizations_org_role" ON "public"."user_organizations" USING "btree" ("organization_id", "role");
+
+
+
 CREATE INDEX "idx_user_organizations_organization_id" ON "public"."user_organizations" USING "btree" ("organization_id");
 
 
 
 CREATE INDEX "idx_user_organizations_user_id" ON "public"."user_organizations" USING "btree" ("user_id");
+
+
+
+CREATE INDEX "idx_user_profiles_org" ON "public"."user_profiles" USING "btree" ("organization_id");
+
+
+
+CREATE INDEX "idx_user_profiles_organization_id" ON "public"."user_profiles" USING "btree" ("organization_id");
+
+
+
+CREATE INDEX "idx_user_profiles_user" ON "public"."user_profiles" USING "btree" ("user_id");
 
 
 
@@ -5232,6 +5961,18 @@ CREATE INDEX "user_organizations_organization_id_idx" ON "public"."user_organiza
 
 
 CREATE INDEX "user_organizations_user_id_idx" ON "public"."user_organizations" USING "btree" ("user_id");
+
+
+
+CREATE OR REPLACE TRIGGER "crm_column_mappings_updated_at" BEFORE UPDATE ON "public"."crm_column_mappings" FOR EACH ROW EXECUTE FUNCTION "public"."update_crm_column_mappings_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "crm_lists_updated_at" BEFORE UPDATE ON "public"."crm_lists" FOR EACH ROW EXECUTE FUNCTION "public"."update_crm_lists_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "sync_tasks_assigned_to_user_id_trigger" BEFORE INSERT OR UPDATE ON "public"."tasks" FOR EACH ROW EXECUTE FUNCTION "public"."sync_tasks_assigned_to_user_id"();
 
 
 
@@ -5339,11 +6080,25 @@ CREATE OR REPLACE TRIGGER "update_usage_summary_trigger" AFTER INSERT ON "public
 
 
 
+CREATE OR REPLACE TRIGGER "update_user_profiles_updated_at_trigger" BEFORE UPDATE ON "public"."user_profiles" FOR EACH ROW EXECUTE FUNCTION "public"."update_user_profiles_updated_at"();
+
+
+
 CREATE OR REPLACE TRIGGER "validate_task_contact_on_insert" BEFORE INSERT ON "public"."tasks" FOR EACH ROW EXECUTE FUNCTION "public"."validate_task_contact"();
 
 
 
 CREATE OR REPLACE TRIGGER "validate_task_contact_on_update" BEFORE UPDATE ON "public"."tasks" FOR EACH ROW WHEN (("new"."contact_id" IS DISTINCT FROM "old"."contact_id")) EXECUTE FUNCTION "public"."validate_task_contact"();
+
+
+
+ALTER TABLE ONLY "public"."billing_customers"
+    ADD CONSTRAINT "billing_customers_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."billing_invoices"
+    ADD CONSTRAINT "billing_invoices_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE CASCADE;
 
 
 
@@ -5424,6 +6179,11 @@ ALTER TABLE ONLY "public"."campaigns"
 
 ALTER TABLE ONLY "public"."campaigns"
     ADD CONSTRAINT "campaigns_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."companies"
+    ADD CONSTRAINT "companies_assigned_to_user_id_fkey" FOREIGN KEY ("assigned_to_user_id") REFERENCES "public"."user"("id") ON DELETE SET NULL;
 
 
 
@@ -5513,6 +6273,11 @@ ALTER TABLE ONLY "public"."contact_notes"
 
 
 ALTER TABLE ONLY "public"."contacts"
+    ADD CONSTRAINT "contacts_assigned_to_user_id_fkey" FOREIGN KEY ("assigned_to_user_id") REFERENCES "public"."user"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."contacts"
     ADD CONSTRAINT "contacts_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE CASCADE;
 
 
@@ -5544,6 +6309,36 @@ ALTER TABLE ONLY "public"."conversations"
 
 ALTER TABLE ONLY "public"."conversations"
     ADD CONSTRAINT "conversations_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."crm_column_mappings"
+    ADD CONSTRAINT "crm_column_mappings_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."crm_lists"
+    ADD CONSTRAINT "crm_lists_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."crm_raw_records"
+    ADD CONSTRAINT "crm_raw_records_extracted_company_id_fkey" FOREIGN KEY ("extracted_company_id") REFERENCES "public"."companies"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."crm_raw_records"
+    ADD CONSTRAINT "crm_raw_records_extracted_person_id_fkey" FOREIGN KEY ("extracted_person_id") REFERENCES "public"."contacts"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."crm_raw_records"
+    ADD CONSTRAINT "crm_raw_records_list_id_fkey" FOREIGN KEY ("list_id") REFERENCES "public"."crm_lists"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."crm_raw_records"
+    ADD CONSTRAINT "crm_raw_records_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE CASCADE;
 
 
 
@@ -5602,6 +6397,16 @@ ALTER TABLE ONLY "public"."interviewer"
 
 
 
+ALTER TABLE ONLY "public"."notifications"
+    ADD CONSTRAINT "notifications_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."notifications"
+    ADD CONSTRAINT "notifications_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE CASCADE;
+
+
+
 ALTER TABLE ONLY "public"."organization_files"
     ADD CONSTRAINT "organization_files_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE CASCADE;
 
@@ -5633,6 +6438,11 @@ ALTER TABLE ONLY "public"."style_guidelines"
 
 
 ALTER TABLE ONLY "public"."tasks"
+    ADD CONSTRAINT "tasks_assigned_to_user_id_fkey" FOREIGN KEY ("assigned_to_user_id") REFERENCES "public"."user"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."tasks"
     ADD CONSTRAINT "tasks_campaign_id_fkey" FOREIGN KEY ("campaign_id") REFERENCES "public"."campaigns"("id") ON DELETE SET NULL;
 
 
@@ -5652,6 +6462,16 @@ ALTER TABLE ONLY "public"."tasks"
 
 
 
+ALTER TABLE ONLY "public"."token_usage"
+    ADD CONSTRAINT "token_usage_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."usage"
+    ADD CONSTRAINT "usage_invoice_id_fkey" FOREIGN KEY ("invoice_id") REFERENCES "public"."billing_invoices"("id") ON DELETE SET NULL;
+
+
+
 ALTER TABLE ONLY "public"."user_organizations"
     ADD CONSTRAINT "user_organizations_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id");
 
@@ -5662,11 +6482,29 @@ ALTER TABLE ONLY "public"."user_organizations"
 
 
 
+ALTER TABLE ONLY "public"."user_profiles"
+    ADD CONSTRAINT "user_profiles_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."user_profiles"
+    ADD CONSTRAINT "user_profiles_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE CASCADE;
+
+
+
 CREATE POLICY "Allow all operations on usage" ON "public"."usage" USING (true);
 
 
 
 CREATE POLICY "Allow all operations on usage_summary" ON "public"."usage_summary" USING (true);
+
+
+
+CREATE POLICY "Backend services can manage notifications" ON "public"."notifications" USING (("current_setting"('request.jwt.claim.role'::"text", true) = 'service_role'::"text")) WITH CHECK (("current_setting"('request.jwt.claim.role'::"text", true) = 'service_role'::"text"));
+
+
+
+CREATE POLICY "Backend services can manage user profiles" ON "public"."user_profiles" USING (("current_setting"('request.jwt.claim.role'::"text", true) = 'service_role'::"text")) WITH CHECK (("current_setting"('request.jwt.claim.role'::"text", true) = 'service_role'::"text"));
 
 
 
@@ -5699,6 +6537,18 @@ CREATE POLICY "Users can create campaigns in their organization" ON "public"."ca
 CREATE POLICY "Users can create contacts in their organization" ON "public"."contacts" FOR INSERT WITH CHECK (("organization_id" IN ( SELECT "user_organizations"."organization_id"
    FROM "public"."user_organizations"
   WHERE ("user_organizations"."user_id" = ("auth"."uid"())::"text"))));
+
+
+
+CREATE POLICY "Users can delete CRM column mappings for their organization" ON "public"."crm_column_mappings" FOR DELETE USING (("organization_id" = "current_setting"('app.current_org_id'::"text", true)));
+
+
+
+CREATE POLICY "Users can delete CRM lists for their organization" ON "public"."crm_lists" FOR DELETE USING (("organization_id" = "current_setting"('app.current_org_id'::"text", true)));
+
+
+
+CREATE POLICY "Users can delete CRM raw records for their organization" ON "public"."crm_raw_records" FOR DELETE USING (("organization_id" = "current_setting"('app.current_org_id'::"text", true)));
 
 
 
@@ -5746,6 +6596,18 @@ CREATE POLICY "Users can delete their own company activities" ON "public"."compa
 
 
 
+CREATE POLICY "Users can insert CRM column mappings for their organization" ON "public"."crm_column_mappings" FOR INSERT WITH CHECK (("organization_id" = "current_setting"('app.current_org_id'::"text", true)));
+
+
+
+CREATE POLICY "Users can insert CRM lists for their organization" ON "public"."crm_lists" FOR INSERT WITH CHECK (("organization_id" = "current_setting"('app.current_org_id'::"text", true)));
+
+
+
+CREATE POLICY "Users can insert CRM raw records for their organization" ON "public"."crm_raw_records" FOR INSERT WITH CHECK (("organization_id" = "current_setting"('app.current_org_id'::"text", true)));
+
+
+
 CREATE POLICY "Users can insert ICP profiles for their organization" ON "public"."icp_profiles" FOR INSERT WITH CHECK (("organization_id" IN ( SELECT "organization"."id"
    FROM "public"."organization"
   WHERE ("organization"."id" = "icp_profiles"."organization_id"))));
@@ -5775,6 +6637,12 @@ CREATE POLICY "Users can insert company activities for their organization" ON "p
 
 
 CREATE POLICY "Users can insert files for their organization" ON "public"."organization_files" FOR INSERT WITH CHECK (("auth"."uid"() IS NOT NULL));
+
+
+
+CREATE POLICY "Users can insert their own profile" ON "public"."user_profiles" FOR INSERT WITH CHECK ((("user_id" = "public"."requesting_user_id"()) AND ("organization_id" IN ( SELECT "user_organizations"."organization_id"
+   FROM "public"."user_organizations"
+  WHERE ("user_organizations"."user_id" = "public"."requesting_user_id"())))));
 
 
 
@@ -5832,6 +6700,18 @@ CREATE POLICY "Users can manage tasks in their organization" ON "public"."tasks"
 
 
 
+CREATE POLICY "Users can update CRM column mappings for their organization" ON "public"."crm_column_mappings" FOR UPDATE USING (("organization_id" = "current_setting"('app.current_org_id'::"text", true)));
+
+
+
+CREATE POLICY "Users can update CRM lists for their organization" ON "public"."crm_lists" FOR UPDATE USING (("organization_id" = "current_setting"('app.current_org_id'::"text", true)));
+
+
+
+CREATE POLICY "Users can update CRM raw records for their organization" ON "public"."crm_raw_records" FOR UPDATE USING (("organization_id" = "current_setting"('app.current_org_id'::"text", true)));
+
+
+
 CREATE POLICY "Users can update campaign companies for their organization" ON "public"."campaign_companies" FOR UPDATE USING (("organization_id" = ("auth"."jwt"() ->> 'organization_id'::"text")));
 
 
@@ -5865,6 +6745,42 @@ CREATE POLICY "Users can update their organization's files" ON "public"."organiz
 
 
 CREATE POLICY "Users can update their own company activities" ON "public"."company_activities" FOR UPDATE USING ((("organization_id" = "current_setting"('app.current_organization_id'::"text", true)) AND ("created_by_user_id" = "current_setting"('app.current_user_id'::"text", true))));
+
+
+
+CREATE POLICY "Users can update their own notifications" ON "public"."notifications" FOR UPDATE USING ((("user_id" = "public"."requesting_user_id"()) AND ("organization_id" IN ( SELECT "user_organizations"."organization_id"
+   FROM "public"."user_organizations"
+  WHERE ("user_organizations"."user_id" = "public"."requesting_user_id"()))))) WITH CHECK ((("user_id" = "public"."requesting_user_id"()) AND ("organization_id" IN ( SELECT "user_organizations"."organization_id"
+   FROM "public"."user_organizations"
+  WHERE ("user_organizations"."user_id" = "public"."requesting_user_id"())))));
+
+
+
+CREATE POLICY "Users can update their own profile" ON "public"."user_profiles" FOR UPDATE USING ((("user_id" = "public"."requesting_user_id"()) AND ("organization_id" IN ( SELECT "user_organizations"."organization_id"
+   FROM "public"."user_organizations"
+  WHERE ("user_organizations"."user_id" = "public"."requesting_user_id"()))))) WITH CHECK ((("user_id" = "public"."requesting_user_id"()) AND ("organization_id" IN ( SELECT "user_organizations"."organization_id"
+   FROM "public"."user_organizations"
+  WHERE ("user_organizations"."user_id" = "public"."requesting_user_id"())))));
+
+
+
+CREATE POLICY "Users can update their own user profile" ON "public"."user_profiles" FOR UPDATE USING ((("user_id" = ("auth"."uid"())::"text") AND ("organization_id" IN ( SELECT "user_organizations"."organization_id"
+   FROM "public"."user_organizations"
+  WHERE ("user_organizations"."user_id" = ("auth"."uid"())::"text"))))) WITH CHECK ((("user_id" = ("auth"."uid"())::"text") AND ("organization_id" IN ( SELECT "user_organizations"."organization_id"
+   FROM "public"."user_organizations"
+  WHERE ("user_organizations"."user_id" = ("auth"."uid"())::"text")))));
+
+
+
+CREATE POLICY "Users can view CRM column mappings for their organization" ON "public"."crm_column_mappings" FOR SELECT USING (("organization_id" = "current_setting"('app.current_org_id'::"text", true)));
+
+
+
+CREATE POLICY "Users can view CRM lists for their organization" ON "public"."crm_lists" FOR SELECT USING (("organization_id" = "current_setting"('app.current_org_id'::"text", true)));
+
+
+
+CREATE POLICY "Users can view CRM raw records for their organization" ON "public"."crm_raw_records" FOR SELECT USING (("organization_id" = "current_setting"('app.current_org_id'::"text", true)));
 
 
 
@@ -5978,6 +6894,30 @@ CREATE POLICY "Users can view their organization's files" ON "public"."organizat
 
 
 
+CREATE POLICY "Users can view their own notifications" ON "public"."notifications" FOR SELECT USING ((("user_id" = "public"."requesting_user_id"()) AND ("organization_id" IN ( SELECT "user_organizations"."organization_id"
+   FROM "public"."user_organizations"
+  WHERE ("user_organizations"."user_id" = "public"."requesting_user_id"())))));
+
+
+
+CREATE POLICY "Users can view their own profile" ON "public"."user_profiles" FOR SELECT USING ((("user_id" = "public"."requesting_user_id"()) AND ("organization_id" IN ( SELECT "user_organizations"."organization_id"
+   FROM "public"."user_organizations"
+  WHERE ("user_organizations"."user_id" = "public"."requesting_user_id"())))));
+
+
+
+CREATE POLICY "Users can view their own user profile" ON "public"."user_profiles" FOR SELECT USING ((("user_id" = ("auth"."uid"())::"text") AND ("organization_id" IN ( SELECT "user_organizations"."organization_id"
+   FROM "public"."user_organizations"
+  WHERE ("user_organizations"."user_id" = ("auth"."uid"())::"text")))));
+
+
+
+ALTER TABLE "public"."billing_customers" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."billing_invoices" ENABLE ROW LEVEL SECURITY;
+
+
 ALTER TABLE "public"."campaign_activities" ENABLE ROW LEVEL SECURITY;
 
 
@@ -6017,6 +6957,15 @@ ALTER TABLE "public"."conversation_messages" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."conversations" ENABLE ROW LEVEL SECURITY;
 
 
+ALTER TABLE "public"."crm_column_mappings" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."crm_lists" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."crm_raw_records" ENABLE ROW LEVEL SECURITY;
+
+
 ALTER TABLE "public"."document_access_events" ENABLE ROW LEVEL SECURITY;
 
 
@@ -6024,6 +6973,12 @@ ALTER TABLE "public"."document_short_urls" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."icp_profiles" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."invitation_metadata" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."notifications" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."organization_files" ENABLE ROW LEVEL SECURITY;
@@ -6054,6 +7009,9 @@ ALTER TABLE "public"."usage" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."usage_summary" ENABLE ROW LEVEL SECURITY;
 
 
+ALTER TABLE "public"."user_profiles" ENABLE ROW LEVEL SECURITY;
+
+
 
 
 ALTER PUBLICATION "supabase_realtime" OWNER TO "postgres";
@@ -6072,6 +7030,10 @@ ALTER PUBLICATION "supabase_realtime" ADD TABLE ONLY "public"."companies";
 
 
 ALTER PUBLICATION "supabase_realtime" ADD TABLE ONLY "public"."contacts";
+
+
+
+ALTER PUBLICATION "supabase_realtime" ADD TABLE ONLY "public"."notifications";
 
 
 
@@ -6599,6 +7561,12 @@ GRANT ALL ON FUNCTION "public"."get_dashboard_stats"("p_organization_id" "text")
 
 
 
+GRANT ALL ON FUNCTION "public"."get_dashboard_stats_simple"("p_org_id" "text") TO "anon";
+GRANT ALL ON FUNCTION "public"."get_dashboard_stats_simple"("p_org_id" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."get_dashboard_stats_simple"("p_org_id" "text") TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."get_organization_summary"("p_organization_id" "text") TO "anon";
 GRANT ALL ON FUNCTION "public"."get_organization_summary"("p_organization_id" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."get_organization_summary"("p_organization_id" "text") TO "service_role";
@@ -7042,6 +8010,12 @@ GRANT ALL ON FUNCTION "public"."remove_deleted_file_from_companies"() TO "servic
 
 
 
+GRANT ALL ON FUNCTION "public"."requesting_user_id"() TO "anon";
+GRANT ALL ON FUNCTION "public"."requesting_user_id"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."requesting_user_id"() TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."reset_icp_blocking_for_profile"("profile_id" "uuid") TO "anon";
 GRANT ALL ON FUNCTION "public"."reset_icp_blocking_for_profile"("profile_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."reset_icp_blocking_for_profile"("profile_id" "uuid") TO "service_role";
@@ -7208,6 +8182,12 @@ GRANT ALL ON FUNCTION "public"."subvector"("public"."vector", integer, integer) 
 
 
 
+GRANT ALL ON FUNCTION "public"."sync_tasks_assigned_to_user_id"() TO "anon";
+GRANT ALL ON FUNCTION "public"."sync_tasks_assigned_to_user_id"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."sync_tasks_assigned_to_user_id"() TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."update_campaign_companies_updated_at"() TO "anon";
 GRANT ALL ON FUNCTION "public"."update_campaign_companies_updated_at"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."update_campaign_companies_updated_at"() TO "service_role";
@@ -7229,6 +8209,18 @@ GRANT ALL ON FUNCTION "public"."update_company_blocked_status"() TO "service_rol
 GRANT ALL ON FUNCTION "public"."update_company_contacts_updated_at"() TO "anon";
 GRANT ALL ON FUNCTION "public"."update_company_contacts_updated_at"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."update_company_contacts_updated_at"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."update_crm_column_mappings_updated_at"() TO "anon";
+GRANT ALL ON FUNCTION "public"."update_crm_column_mappings_updated_at"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."update_crm_column_mappings_updated_at"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."update_crm_lists_updated_at"() TO "anon";
+GRANT ALL ON FUNCTION "public"."update_crm_lists_updated_at"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."update_crm_lists_updated_at"() TO "service_role";
 
 
 
@@ -7265,6 +8257,12 @@ GRANT ALL ON FUNCTION "public"."update_updated_at_column"() TO "service_role";
 GRANT ALL ON FUNCTION "public"."update_usage_summary"() TO "anon";
 GRANT ALL ON FUNCTION "public"."update_usage_summary"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."update_usage_summary"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."update_user_profiles_updated_at"() TO "anon";
+GRANT ALL ON FUNCTION "public"."update_user_profiles_updated_at"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."update_user_profiles_updated_at"() TO "service_role";
 
 
 
@@ -7504,6 +8502,30 @@ GRANT ALL ON FUNCTION "public"."sum"("public"."vector") TO "service_role";
 
 
 
+GRANT ALL ON TABLE "public"."usage" TO "anon";
+GRANT ALL ON TABLE "public"."usage" TO "authenticated";
+GRANT ALL ON TABLE "public"."usage" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."analytics_usage_daily" TO "anon";
+GRANT ALL ON TABLE "public"."analytics_usage_daily" TO "authenticated";
+GRANT ALL ON TABLE "public"."analytics_usage_daily" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."billing_customers" TO "anon";
+GRANT ALL ON TABLE "public"."billing_customers" TO "authenticated";
+GRANT ALL ON TABLE "public"."billing_customers" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."billing_invoices" TO "anon";
+GRANT ALL ON TABLE "public"."billing_invoices" TO "authenticated";
+GRANT ALL ON TABLE "public"."billing_invoices" TO "service_role";
+
+
+
 GRANT ALL ON TABLE "public"."campaign_activities" TO "anon";
 GRANT ALL ON TABLE "public"."campaign_activities" TO "authenticated";
 GRANT ALL ON TABLE "public"."campaign_activities" TO "service_role";
@@ -7594,6 +8616,24 @@ GRANT ALL ON TABLE "public"."conversations" TO "service_role";
 
 
 
+GRANT ALL ON TABLE "public"."crm_column_mappings" TO "anon";
+GRANT ALL ON TABLE "public"."crm_column_mappings" TO "authenticated";
+GRANT ALL ON TABLE "public"."crm_column_mappings" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."crm_lists" TO "anon";
+GRANT ALL ON TABLE "public"."crm_lists" TO "authenticated";
+GRANT ALL ON TABLE "public"."crm_lists" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."crm_raw_records" TO "anon";
+GRANT ALL ON TABLE "public"."crm_raw_records" TO "authenticated";
+GRANT ALL ON TABLE "public"."crm_raw_records" TO "service_role";
+
+
+
 GRANT ALL ON TABLE "public"."token_usage" TO "anon";
 GRANT ALL ON TABLE "public"."token_usage" TO "authenticated";
 GRANT ALL ON TABLE "public"."token_usage" TO "service_role";
@@ -7603,12 +8643,6 @@ GRANT ALL ON TABLE "public"."token_usage" TO "service_role";
 GRANT ALL ON TABLE "public"."daily_token_usage" TO "anon";
 GRANT ALL ON TABLE "public"."daily_token_usage" TO "authenticated";
 GRANT ALL ON TABLE "public"."daily_token_usage" TO "service_role";
-
-
-
-GRANT ALL ON TABLE "public"."usage" TO "anon";
-GRANT ALL ON TABLE "public"."usage" TO "authenticated";
-GRANT ALL ON TABLE "public"."usage" TO "service_role";
 
 
 
@@ -7663,6 +8697,18 @@ GRANT ALL ON TABLE "public"."interviewer" TO "service_role";
 GRANT ALL ON SEQUENCE "public"."interviewer_id_seq" TO "anon";
 GRANT ALL ON SEQUENCE "public"."interviewer_id_seq" TO "authenticated";
 GRANT ALL ON SEQUENCE "public"."interviewer_id_seq" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."invitation_metadata" TO "anon";
+GRANT ALL ON TABLE "public"."invitation_metadata" TO "authenticated";
+GRANT ALL ON TABLE "public"."invitation_metadata" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."notifications" TO "anon";
+GRANT ALL ON TABLE "public"."notifications" TO "authenticated";
+GRANT ALL ON TABLE "public"."notifications" TO "service_role";
 
 
 
@@ -7816,6 +8862,12 @@ GRANT ALL ON TABLE "public"."user_organizations" TO "service_role";
 
 
 
+GRANT ALL ON TABLE "public"."user_profiles" TO "anon";
+GRANT ALL ON TABLE "public"."user_profiles" TO "authenticated";
+GRANT ALL ON TABLE "public"."user_profiles" TO "service_role";
+
+
+
 
 
 
@@ -7846,6 +8898,8 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TAB
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES  TO "anon";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES  TO "authenticated";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES  TO "service_role";
+
+
 
 
 
