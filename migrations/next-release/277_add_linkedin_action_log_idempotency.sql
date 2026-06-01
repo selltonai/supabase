@@ -1,0 +1,141 @@
+-- ============================================================
+--  Migration: 264_add_linkedin_action_log_idempotency
+--  Date:      2026-05-13
+--  Author:    Sellton AI — Outreach Intelligence Bug #5
+--  Plan ref:  Ground Truth/OUTREACH_INTELLIGENCE_PLAN.md §7.10
+--             Ground Truth/OUTREACH_INTELLIGENCE_PLAN_v1.1_REVIEW.md §1.3
+--
+--  Revision (2026-05-13 — post-code-review):
+--    Dropped the `WHERE provider_action_id IS NOT NULL` partial-index
+--    predicate. See "Why a NON-partial unique index" below.
+-- ============================================================
+--
+--  Purpose
+--  -------
+--  Add a UNIQUE INDEX on linkedin_action_log so webhook replays from
+--  Unipile cannot create duplicate dispatch rows for the same provider
+--  action. Today the INSERT at `src/lib/linkedin-task-dispatch.ts:982`
+--  is a naked .insert() with no ON CONFLICT — every webhook replay
+--  multiplies the log row count, which inflates the rolling 24h count
+--  used by `checkRateLimit()` and produces false-positive cap-reached
+--  errors.
+--
+--  Why a NON-partial unique index (revised after code review)
+--  -----------------------------------------------------------
+--  The initial draft of this migration used:
+--      CREATE UNIQUE INDEX ... WHERE provider_action_id IS NOT NULL
+--
+--  Code-review found this was incompatible with the supabase-js upsert
+--  pattern used at the call sites:
+--      .upsert(row, {
+--          onConflict: "unipile_account_id,action_type,provider_action_id",
+--          ignoreDuplicates: true
+--      })
+--
+--  PostgREST translates that to:
+--      INSERT ... ON CONFLICT (unipile_account_id, action_type,
+--      provider_action_id) DO NOTHING
+--
+--  PostgreSQL's unique index inference (per the PostgreSQL docs for
+--  INSERT ... ON CONFLICT) requires that for a PARTIAL unique index to
+--  be matched, the conflict_target MUST include the WHERE predicate:
+--      ON CONFLICT (a, b, c) WHERE c IS NOT NULL DO NOTHING
+--
+--  supabase-js does not expose the WHERE clause in its `onConflict`
+--  option. Without the WHERE clause, PostgreSQL would raise:
+--      ERROR: there is no unique or exclusion constraint matching
+--      the ON CONFLICT specification
+--
+--  The fix: use a NON-partial unique index. PostgreSQL's standard
+--  unique-comparison semantic gives us the SAME behavior we wanted
+--  from the partial index, for free:
+--
+--    > By default, two null values are not considered equal in this
+--    > comparison. So, for example, a unique index could contain
+--    > multiple rows of null values in a column with no equality
+--    > matches.
+--    > — https://www.postgresql.org/docs/current/indexes-unique.html
+--
+--  So with a non-partial UNIQUE INDEX on (unipile_account_id,
+--  action_type, provider_action_id):
+--    • Multiple rows with `provider_action_id = NULL` are ALLOWED
+--      (legitimate forensic failure data — when Unipile returns
+--       success without a provider_action_id)
+--    • Two rows with the same non-NULL provider_action_id for the
+--      same (account, action_type) are BLOCKED — the dedup behavior
+--      we wanted for webhook replays
+--
+--  This is exactly the behavior the partial predicate was attempting,
+--  but it works with PostgREST's ON CONFLICT inference.
+--
+--  Why the (account, action_type, provider_action_id) tuple
+--  --------------------------------------------------------
+--  Unipile assigns provider_action_id per (account, action) pair.
+--  Two different LinkedIn accounts can theoretically receive the
+--  same provider_action_id from Unipile's perspective (unlikely but
+--  not impossible across regions). Scoping by account_id is the safe
+--  cross-tenant boundary. action_type is included so an INVITATION
+--  and a MESSAGE that happen to share an id are still distinguishable
+--  — defensive against future Unipile id namespace changes.
+--
+--  Behavior change in the application layer
+--  ----------------------------------------
+--  `linkedin-task-dispatch.ts` and `linkedin/threads/[id]/reply/route.ts`
+--  switched from `.insert(...)` to `.upsert(..., { ignoreDuplicates: true })`
+--  with the matching conflict target. Companion code commit; without
+--  this index the upsert would fail with "no unique constraint
+--  matching".
+--
+--  Verify (after apply):
+--    SELECT indexname, indexdef FROM pg_indexes
+--    WHERE tablename = 'linkedin_action_log'
+--      AND indexname = 'idx_linkedin_action_log_provider_idem';
+--    -- Returns: 1 row, UNIQUE non-partial index on
+--    --   (unipile_account_id, action_type, provider_action_id)
+--
+--  Rollback:
+--    DROP INDEX IF EXISTS public.idx_linkedin_action_log_provider_idem;
+--
+--  Idempotent: re-runnable. CREATE UNIQUE INDEX IF NOT EXISTS handles
+--  the re-apply case cleanly. Pre-existing duplicate rows (if any)
+--  will cause the FIRST apply to fail with a constraint violation —
+--  see "Pre-apply duplicate cleanup" below.
+--
+--  Pre-apply duplicate cleanup (if needed)
+--  ---------------------------------------
+--  If applying this migration errors with "could not create unique
+--  index", duplicates already exist. Identify them with:
+--
+--    SELECT unipile_account_id, action_type, provider_action_id, COUNT(*)
+--    FROM linkedin_action_log
+--    WHERE provider_action_id IS NOT NULL
+--    GROUP BY 1,2,3
+--    HAVING COUNT(*) > 1;
+--
+--  Resolution (preserves the OLDEST row of each dupe set):
+--
+--    DELETE FROM linkedin_action_log a
+--    USING linkedin_action_log b
+--    WHERE a.id > b.id
+--      AND a.unipile_account_id = b.unipile_account_id
+--      AND a.action_type = b.action_type
+--      AND a.provider_action_id = b.provider_action_id
+--      AND a.provider_action_id IS NOT NULL;
+--
+--  (Note: the `a.id > b.id` tie-breaker assumes UUID v4 ordering is
+--   roughly monotonic. UUIDs are NOT strictly time-ordered, so this
+--   preserves an *arbitrary* row from each dupe set — for our case
+--   that's fine since duplicates are by definition equivalent.)
+--
+--  Then re-run this migration.
+-- ============================================================
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_linkedin_action_log_provider_idem
+  ON public.linkedin_action_log (
+    unipile_account_id,
+    action_type,
+    provider_action_id
+  );
+
+COMMENT ON INDEX public.idx_linkedin_action_log_provider_idem IS
+  'Outreach Intelligence Bug #5 — webhook idempotency. Non-partial UNIQUE on (unipile_account_id, action_type, provider_action_id). PostgreSQL NULL-not-equal-NULL semantic gives the same behavior as a partial index WHERE provider_action_id IS NOT NULL would have, but is compatible with PostgREST/supabase-js ON CONFLICT inference (partial-index inference requires the WHERE clause in the conflict target, which supabase-js does not expose). Paired with ON CONFLICT DO NOTHING on the insert path in src/lib/linkedin-task-dispatch.ts. See Ground Truth/OUTREACH_INTELLIGENCE_PLAN_v1.1_REVIEW.md §1.3 and the code-review fix at commit (this).';

@@ -1,0 +1,107 @@
+-- ============================================================
+--  Migration: 267_add_campaign_goal_column
+--  Date:      2026-05-13
+--  Author:    Sellton AI — Outreach Intelligence Sprint 2 Commit #5a (Path 3 Hybrid)
+--  Plan ref:  Ground Truth/OUTREACH_INTELLIGENCE_PLAN.md §2.4
+--             Ground Truth/OUTREACH_INTELLIGENCE_BUILD_LOG.md "Path 3 (Hybrid) — operator confirmed"
+-- ============================================================
+--
+--  Purpose
+--  -------
+--  Add a single JSONB column to capture the plan §2.4 structured
+--  `campaign_goal` block — the second extraction layer Sonnet
+--  produces alongside `pain_statement` (migration 266).
+--
+--  Migrations 266 (pain extraction) + 267 (campaign goal) together
+--  give Sellton the FULL data shape envisioned by Outreach Intelligence
+--  plan §2 — extracted from two separate operator-input fields
+--  (description + product_description) per the Path 3 Hybrid choice
+--  documented in the build log. Two-textarea UX preserved.
+--
+--  Why a SINGLE jsonb column (not 5 flat columns)
+--  -----------------------------------------------
+--  The plan envisions a nested structure:
+--    {
+--      target_persona: str,
+--      target_outcome: { type: enum, specifics: str, call_length_minutes: int|null },
+--      value_prop_hypothesis: str,
+--      expected_objection: str|null,
+--      proof_point: { type: enum, summary: str|null }
+--    }
+--
+--  Flattening to 5+ columns would:
+--    - Lose the natural nesting (target_outcome.type vs target_outcome.specifics)
+--    - Force CHECK constraints on enum fields that may evolve as the
+--      product matures (book_call vs start_thread etc. — likely to
+--      expand in Sprint 4+)
+--    - Bloat the campaigns table for a field read by 3-4 specific
+--      downstream consumers (Email Distillation, LinkedIn writer)
+--
+--  JSONB keeps the shape coherent + lets the structure evolve without
+--  ALTER TABLE churn. Sprint 3+ services read it as a dict.
+--
+--  Why NULL allowed (not NOT NULL DEFAULT '{}'::jsonb)
+--  ---------------------------------------------------
+--  Legacy campaigns (created pre-#5a) have NO extraction. Distinguishing
+--  "never extracted" (NULL) from "extracted but empty result" (empty
+--  object) matters for the backfill cron — `WHERE campaign_goal IS NULL`
+--  finds candidates cleanly.
+--
+--  The existing `pain_extraction_pending` partial index (migration 266)
+--  also serves the unified backfill query since pain + goal are
+--  extracted in the SAME Sonnet call (so `pain_extracted_at IS NULL`
+--  ⇔ `campaign_goal IS NULL` post-Path-3).
+--
+--  Why NO new index
+--  ----------------
+--  campaign_goal isn't a query filter — it's data that downstream
+--  services read AFTER selecting a campaign by id. Adding a GIN index
+--  on JSONB is premature optimization until/unless we see a query
+--  pattern that needs it (e.g., "find campaigns targeting persona X").
+--  Sprint 4+ can add GIN if needed.
+--
+--  Schema example (verified against Outreach Intelligence plan §2.4 line 228-249):
+--
+--    {
+--      "target_persona": "Finance directors at mid-market SaaS (100-500 employees) running multi-entity ops",
+--      "target_outcome": {
+--        "type": "book_call",
+--        "specifics": "Book a 20-min walkthrough to see how we automate reconciliation",
+--        "call_length_minutes": 20
+--      },
+--      "value_prop_hypothesis": "Multi-entity finance teams are drowning in manual reconciliation; automating it returns days/month to the team",
+--      "expected_objection": "We already have NetSuite — do we need another tool?",
+--      "proof_point": {
+--        "type": "case_study",
+--        "summary": "ClientX cut month-end close from 9 days to 2 days"
+--      }
+--    }
+--
+--  Idempotent: ADD COLUMN IF NOT EXISTS — safe to re-run.
+--
+--  Pre-apply check (should return 0 rows; if 1 row, column exists already):
+--
+--    SELECT column_name FROM information_schema.columns
+--    WHERE table_name = 'campaigns' AND column_name = 'campaign_goal';
+--
+--  Post-apply verification:
+--
+--    SELECT column_name, data_type, is_nullable
+--    FROM information_schema.columns
+--    WHERE table_name = 'campaigns' AND column_name = 'campaign_goal';
+--    -- Expected: 1 row, data_type='jsonb', is_nullable='YES'
+--
+--  Rollback (safe; column is additive):
+--
+--    ALTER TABLE public.campaigns DROP COLUMN IF EXISTS campaign_goal;
+--
+--  Coordinated rollback: this migration must be reverted AFTER any
+--  service code that writes to it (Sprint 2 #5a service changes ship
+--  in the same commit; revert that commit FIRST, then drop the column).
+-- ============================================================
+
+ALTER TABLE public.campaigns
+  ADD COLUMN IF NOT EXISTS campaign_goal JSONB NULL;
+
+COMMENT ON COLUMN public.campaigns.campaign_goal IS
+  'Sprint 2 #5a (Path 3 Hybrid) — Structured campaign intent block extracted by CampaignPainExtractionService alongside pain_statement. Shape: {target_persona, target_outcome: {type enum, specifics, call_length_minutes?}, value_prop_hypothesis, expected_objection?, proof_point: {type enum, summary?}}. NULL means extraction has not run for this campaign (legacy campaigns OR extraction failed). Per Outreach Intelligence plan §2.4. Consumed by Sprint 3 Email Distillation and Sprint 4 LinkedIn writer for angle selection + objection handling + proof-point selection.';

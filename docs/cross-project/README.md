@@ -50,6 +50,7 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 | **contacts** | selltonai-modal | selltonai, backoffice | Contact records |
 | **company_contacts** | selltonai-modal | selltonai | Company-contact relationships |
 | **tasks** | selltonai-modal | selltonai, backoffice | Verification tasks |
+| **ai_ark_enrollment_runs** | selltonai-modal | backoffice | Idempotency ledger for AI-Ark enrollment recovery |
 
 ### CRM Tables
 
@@ -58,6 +59,7 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 | **crm_lists** | selltonai-modal | selltonai | CRM import lists |
 | **crm_list_members** | selltonai-modal | selltonai | Manual memberships for existing contacts/companies in CRM lists |
 | **crm_raw_records** | selltonai-modal | selltonai | Raw CSV data |
+| **crm_import_jobs** | selltonai-modal | selltonai via Modal API | Durable progress for large CRM CSV imports |
 
 ### Document & Email Tables
 
@@ -67,6 +69,7 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 | **organization_files_chunks** | selltonai-modal | selltonai | Document chunks |
 | **email_accounts** | selltonai-gmail-api | selltonai, modal | Gmail OAuth tokens |
 | **email_tokens** | selltonai-gmail-api | selltonai-modal | Email token tracking |
+| **unmatched_replies** | selltonai-modal | backoffice | Incoming replies that could not be mapped to a contact |
 
 `organization_files.file_category` values currently include `documents`, `transcripts`, `linkedin_voice`, `internal_documents`, `sales_papers`, `sait_guidelines`, `brand_guidelines`, `case_study`, and `sales_scripts`. New values must be added to the Supabase enum and kept aligned in `selltonai`, `selltonai-modal`, and `selltonai-vector-api`.
 
@@ -159,15 +162,70 @@ CREATE TABLE contacts (
   organization_id text NOT NULL REFERENCES organizations(id),
   email text,
   pipeline_stage text DEFAULT 'prospect',
+  processing_status text DEFAULT 'pending',
+  last_reply_sentiment text,
+  last_reply_sub_intent text,
+  last_reply_at timestamptz,
   -- ... enrichment fields (JSONB)
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );
 ```
 
-**Written by**: selltonai-modal (CRUD)  
-**Read by**: selltonai (display), backoffice (oversight)  
+**Written by**: selltonai-modal (CRUD)
+**Read by**: selltonai (display), backoffice (oversight)
 **Unique**: `(organization_id, email)` - one contact per email per org
+**Cleanup status**: `phantom_pending_rediscovery` marks legacy placeholder contacts. These rows are preserved, but selltonai-modal treats them as non-real contacts for AI-Ark enrollment recovery.
+
+---
+
+### ai_ark_enrollment_runs
+
+```sql
+CREATE TABLE ai_ark_enrollment_runs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  enrollment_id text NOT NULL,
+  campaign_id uuid NOT NULL REFERENCES campaigns(id),
+  company_id uuid NOT NULL REFERENCES companies(id),
+  organization_id text NOT NULL REFERENCES organizations(id),
+  status text NOT NULL DEFAULT 'running',
+  result_count integer NOT NULL DEFAULT 0,
+  error_message text,
+  run_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+```
+
+**Written by**: selltonai-modal campaign start recovery
+**Read by**: backoffice/support
+**Unique**: `(enrollment_id, company_id)` prevents duplicate AI-Ark searches for the same campaign/company
+
+---
+
+### unmatched_replies
+
+```sql
+CREATE TABLE unmatched_replies (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id text NOT NULL REFERENCES organizations(id),
+  email_id text,
+  thread_id text,
+  account_id text,
+  from_email text,
+  to_emails text[] DEFAULT '{}',
+  raw_payload jsonb DEFAULT '{}',
+  classification_snapshot jsonb DEFAULT '{}',
+  resolution_status text DEFAULT 'unmatched',
+  resolved_contact_id uuid REFERENCES contacts(id),
+  resolved_company_id uuid REFERENCES companies(id),
+  resolved_campaign_id uuid REFERENCES campaigns(id),
+  received_at timestamptz DEFAULT now()
+);
+```
+
+**Written by**: selltonai-modal incoming email webhook
+**Read by**: backoffice/support
+**Unique**: `email_id` when present, so webhook retries do not duplicate persisted orphan replies
 
 ---
 
@@ -238,6 +296,7 @@ supabase/migrations/
 ├── release_1.0.2/
 ├── release_1.0.3/
 ├── release_1.0.4/
+├── release_1.1.1/
 └── next-release/         # Unreleased migrations
     ├── 224_create_crm_tables.sql
     ├── 232_add_crm_list_id_column.sql
@@ -410,6 +469,19 @@ CSV Upload → Raw records (unknown) → Processing → Extracted
                                       Relationships linked
 ```
 
+Large CSV imports also write progress into `crm_import_jobs`:
+
+```
+queued → importing/raw_import → processing/classification
+                                → processing/companies
+                                → processing/contacts
+                                → processing/relationships
+                                → completed
+                                → failed
+```
+
+`selltonai-modal` is the writer for `crm_import_jobs` and exposes progress to `selltonai` through `GET /lists/{list_id}/import-status`.
+
 ---
 
 ## Backup & Recovery
@@ -470,6 +542,6 @@ supabase migration down
 
 ---
 
-**Last Updated**: April 6, 2026  
+**Last Updated**: May 20, 2026
 **Maintained By**: Database team, update on schema changes  
 **Purpose**: Shared database contracts for all services

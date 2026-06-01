@@ -1,0 +1,78 @@
+-- ============================================================
+--  Migration: 271_reply_drafts_drafter_user_id
+--  Date:      2026-05-28
+--  Author:    Sellton AI — Post-cohort review (Part 2 user_id parity)
+--  Plan ref:  Ground Truth/POST_COHORT_REVIEW_AND_COMPLETION_PLAN.md Part 2
+--             Ground Truth/ARI_ALIGNMENT_V2.md §3 (reply_handler agent)
+-- ============================================================
+--
+--  Purpose
+--  -------
+--  Add `drafter_user_id` to `reply_drafts` so we can audit WHICH REP'S
+--  sender_voice was used when the LinkedIn reply drafter produced this
+--  draft. Sprint 5 Phase D #2 introduced the `rep_user_id` plumbing
+--  through the reply handler service, but the resulting draft row only
+--  recorded `approved_by_user_id` (set later when a human approves the
+--  draft). The drafter_user_id captures the AUTHOR-OF-RECORD at draft
+--  creation time.
+--
+--  Why this matters at scale
+--  -------------------------
+--  Multi-rep orgs have multiple sender_voice rows (one per rep). The
+--  reply handler prefers the rep who owns the LinkedIn account the
+--  inbound landed on (`account.ownerUserId`); falls back to org's
+--  most-recent if rep-specific is absent. Without drafter_user_id on
+--  reply_drafts, an operator reviewing a stale draft can't tell which
+--  rep's voice the drafter used — making per-rep quality measurement
+--  impossible.
+--
+--  Day-1 behavior under defaults (backward compatible)
+--  ---------------------------------------------------
+--  - Column is NULLABLE — existing reply_drafts rows get NULL
+--    (no backfill — the rep_user_id wasn't recorded historically;
+--    can't reconstruct from logs alone)
+--  - New drafts populated by Modal `reply_handler_service` will set
+--    this when `rep_user_id` is present in the classify-and-draft
+--    request (post commit b71233e)
+--
+--  Idempotency
+--  -----------
+--  ADD COLUMN IF NOT EXISTS.
+--
+--  Pre-apply verification
+--  ----------------------
+--    SELECT column_name FROM information_schema.columns
+--    WHERE table_name = 'reply_drafts'
+--      AND column_name = 'drafter_user_id';
+--    -- Expected (pre-apply): 0 rows
+--
+--  Post-apply verification
+--  -----------------------
+--    SELECT column_name, data_type, is_nullable FROM information_schema.columns
+--    WHERE table_name = 'reply_drafts'
+--      AND column_name = 'drafter_user_id';
+--    -- Expected: 1 row; data_type='text'; is_nullable='YES'
+--
+--    -- Confirm comment present
+--    SELECT col_description('public.reply_drafts'::regclass, attnum)
+--    FROM pg_attribute
+--    WHERE attrelid = 'public.reply_drafts'::regclass
+--      AND attname = 'drafter_user_id';
+--
+--  Rollback (safe; additive nullable column)
+--  -----------------------------------------
+--    ALTER TABLE public.reply_drafts DROP COLUMN IF EXISTS drafter_user_id;
+--
+--  ARI alignment
+--  -------------
+--  Carries forward 1:1 to ARI v2's `reply_handler` agent (HIGH, gemini-2.5-flash,
+--  Build Plan v3 week 10). Per Architecture v2 §10, all agent outputs that
+--  use per-rep context should record the rep at output-creation time for
+--  provenance + parity testing. This column is exactly that contract.
+-- ============================================================
+
+ALTER TABLE public.reply_drafts
+  ADD COLUMN IF NOT EXISTS drafter_user_id TEXT;
+
+COMMENT ON COLUMN public.reply_drafts.drafter_user_id IS
+  'Post-cohort review 2026-05-28 — the rep_user_id (Supabase user_id) whose sender_voice the Modal reply drafter used to produce drafted_body. Populated by reply_handler_service from the rep_user_id passed in the classify-and-draft request (the LinkedIn account owner per webhook). Distinct from approved_by_user_id (set later by human approval). NULL for older drafts pre-migration.';
