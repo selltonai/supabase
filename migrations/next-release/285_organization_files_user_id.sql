@@ -1,0 +1,150 @@
+-- ============================================================
+--  Migration: 272_organization_files_user_id
+--  Date:      2026-05-28
+--  Author:    Sellton AI — Post-cohort review (Part 2 user_id parity)
+--  Plan ref:  Ground Truth/POST_COHORT_REVIEW_AND_COMPLETION_PLAN.md Part 2
+--             Ground Truth/KB_INGESTION_AND_CONSUMPTION_REVIEW.md §6
+-- ============================================================
+--
+--  Purpose
+--  -------
+--  Add `user_id` to `organization_files` to represent OWNERSHIP/SCOPE
+--  of a document, NOT uploader attribution. Two distinct concepts that
+--  the prior commit (592802f, since corrected) conflated:
+--
+--    `uploaded_by TEXT` (existing) — WHO uploaded (string, email/name,
+--                                    UI display attribution)
+--    `user_id TEXT` (this migration) — WHO OWNS / what's the SCOPE
+--                                       (NULL = org-wide; non-NULL =
+--                                        personal to a specific rep)
+--
+--  Per OUTREACH_INTELLIGENCE_PLAN.md §4.1 + §1 line 64: the org-vs-user
+--  voice/data split is principled:
+--    - Email = brand voice = org-level (no per-user override)
+--    - LinkedIn = sender voice = per-user-per-org
+--    - KB documents (brand_guidelines, case_study, sales_papers, etc.)
+--      = ORG-LEVEL by default — the org owns them; the operator
+--      uploading is just attribution
+--
+--  Why this matters
+--  ----------------
+--  Without this distinction:
+--    - When Alice uploads "Q4 Brand Guidelines" for the org, the doc
+--      should be retrievable by ALL reps (org-wide). Storing user_id
+--      = Alice's user_id would lock Bob out incorrectly.
+--    - When the per-user voice transcripts are indexed via Modal's
+--      `process_sender_voice_interview` path (commit b71233e, NOT this
+--      BFF route), they DO carry user_id (the rep) — by design.
+--    - Future "Make this personal" UI affordance can set user_id on
+--      specific uploads (personal sales scripts, personal notes).
+--      Out of scope for this batch.
+--
+--  Pinecone search semantics (forward-compat specification)
+--  --------------------------------------------------------
+--  When the writer queries vector_api with `user_id=rep_user_id`, the
+--  server-side filter should return chunks where:
+--
+--      chunk.user_id = query.user_id  -- the rep's own personal stuff
+--      OR chunk.user_id IS NULL        -- org-wide (default for most docs)
+--
+--  And EXCLUDE chunks where:
+--
+--      chunk.user_id IS NOT NULL AND chunk.user_id != query.user_id
+--      -- other reps' personal stuff
+--
+--  Today (vector_api server-side filter pending): the user_id param is
+--  forwarded but may be ignored — no-op behavior. When the server-side
+--  filter ships, the OR-IS-NULL semantics activate automatically.
+--
+--  Day-1 behavior under defaults (backward compatible)
+--  ---------------------------------------------------
+--  - Column is NULLABLE; NULL is the DEFAULT semantic = ORG-WIDE.
+--  - Existing organization_files rows: NULL (correct — they're org-wide).
+--  - NEW uploads via BFF `files.service.ts` (post correction): user_id
+--    INTENTIONALLY OMITTED from the insert payload, so the column
+--    defaults to NULL = org-wide. This is the correct semantic for
+--    KB documents (brand_guidelines, case_study, sales_papers, etc.).
+--  - Future "Make this personal" UI toggle would set user_id explicitly
+--    on the rare per-rep docs (personal scripts, voice notes). Out of
+--    scope for this migration.
+--
+--  uploaded_by stays UNCHANGED
+--  ---------------------------
+--  The existing `uploaded_by` TEXT column is preserved AS-IS — it
+--  serves UI display attribution ("uploaded by alice@example.com").
+--  Together they capture two distinct facts:
+--    `uploaded_by` = "alice@example.com" (WHO uploaded — attribution)
+--    `user_id`     = NULL                (WHO OWNS — org-wide scope)
+--  Or for the rare personal upload (future):
+--    `uploaded_by` = "alice@example.com" (WHO uploaded — same person)
+--    `user_id`     = "user_2abc..."      (WHO OWNS — Alice personally)
+--
+--  Idempotency
+--  -----------
+--  ADD COLUMN IF NOT EXISTS.
+--
+--  Pre-apply verification
+--  ----------------------
+--    SELECT column_name FROM information_schema.columns
+--    WHERE table_name = 'organization_files'
+--      AND column_name = 'user_id';
+--    -- Expected (pre-apply): 0 rows
+--
+--  Post-apply verification
+--  -----------------------
+--    SELECT column_name, data_type, is_nullable FROM information_schema.columns
+--    WHERE table_name = 'organization_files'
+--      AND column_name = 'user_id';
+--    -- Expected: 1 row; data_type='text'; is_nullable='YES'
+--
+--    -- Confirm uploaded_by ALSO still exists (no deprecation)
+--    SELECT column_name FROM information_schema.columns
+--    WHERE table_name = 'organization_files'
+--      AND column_name = 'uploaded_by';
+--    -- Expected: 1 row (legacy column preserved)
+--
+--    -- After deploy, confirm new uploads populate user_id
+--    SELECT COUNT(*) FILTER (WHERE user_id IS NOT NULL) AS with_userid,
+--           COUNT(*) FILTER (WHERE user_id IS NULL) AS legacy_null
+--    FROM organization_files
+--    WHERE created_at > NOW() - INTERVAL '1 hour';
+--    -- Expected (post-deploy + a few uploads): with_userid > 0
+--
+--  Rollback (safe; additive nullable column)
+--  -----------------------------------------
+--    ALTER TABLE public.organization_files DROP COLUMN IF EXISTS user_id;
+--
+--  Application sequencing note (operator) — UPDATED 2026-05-28b
+--  -------------------------------------------------------------
+--  Original commit 592802f wrote user_id on every BFF upload (wrong
+--  semantic — conflated uploader with owner). The correction commit
+--  removes user_id from the BFF insert payload. As a result:
+--
+--    - Migration 272 is now SAFE to apply WITHOUT deploy coordination.
+--      BFF inserts no longer reference the column at all.
+--    - Code that writes user_id (the personal-upload future affordance)
+--      will use the column when it ships.
+--    - Modal's sender_voice upload path (commit b71233e) tags Pinecone
+--      chunk metadata with user_id, but does NOT touch organization_files
+--      (sender voice transcripts skip the organization_files row entirely
+--      — they go straight to Pinecone via vector_api_client.upload_document).
+--
+--  Recommended sequencing (any order works post-correction):
+--    1. Apply migration 272 in Supabase Studio
+--    2. Verify with the post-apply queries above
+--    3. (Already done) BFF + Modal commits deployed
+--
+--  ARI alignment
+--  -------------
+--  When ARI v2 ships its KB ingestion infrastructure (`kb_build` agent,
+--  HIGH, Gemini Pro, Build Plan v3 week 4), the user_id column carries
+--  forward 1:1 — same metadata contract for per-rep KB attribution.
+--  Phase 0 BaseAgent wrapping doesn't touch this column; it's pure
+--  schema that future agents read.
+-- ============================================================
+
+ALTER TABLE public.organization_files
+  ADD COLUMN IF NOT EXISTS user_id TEXT;
+
+COMMENT ON COLUMN public.organization_files.user_id IS
+  'Post-cohort review 2026-05-28 (corrected 2026-05-28b) — SCOPE/OWNERSHIP, NOT uploader. NULL = org-wide (default for KB docs like brand_guidelines, case_study, sales_papers — owned by the org regardless of who uploaded). Non-NULL = personal to that Supabase user (rare; future "Make this personal" UI affordance). Uploader attribution lives in legacy `uploaded_by TEXT` (kept unchanged for UI display). Pinecone search semantics: include chunks where user_id = query_user_id OR user_id IS NULL.';
