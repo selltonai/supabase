@@ -73,6 +73,15 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 
 `organization_files.file_category` values currently include `documents`, `transcripts`, `linkedin_voice`, `internal_documents`, `sales_papers`, `sait_guidelines`, `brand_guidelines`, `case_study`, and `sales_scripts`. New values must be added to the Supabase enum and kept aligned in `selltonai`, `selltonai-modal`, and `selltonai-vector-api`.
 
+### Billing Tables
+
+| Table | Primary Writer | Primary Readers | Purpose |
+|-------|---------------|-----------------|---------|
+| **billing_customers** | selltonai-modal | selltonai, backoffice | Stripe customer/payment settings per organization |
+| **billing_invoices** | selltonai-modal | selltonai, backoffice | Usage invoices, totals, Stripe invoice ids, and hosted invoice links |
+| **billing_invoice_sequences** | selltonai-modal | selltonai-modal | Year-scoped reservation state for explicit Stripe invoice numbers like `SLTN-2026/100001` |
+| **usage** | selltonai-modal | selltonai, backoffice | Billable usage rows linked to generated invoices |
+
 ### ICP & Settings Tables
 
 | Table | Primary Writer | Primary Readers | Purpose |
