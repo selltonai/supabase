@@ -77,7 +77,7 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 
 | Table | Primary Writer | Primary Readers | Purpose |
 |-------|---------------|-----------------|---------|
-| **billing_customers** | selltonai-modal | selltonai, backoffice | Stripe customer/payment settings per organization |
+| **billing_customers** | selltonai-modal | selltonai, backoffice | Workspace billing settings, monthly spend limits, and optional Stripe customer/payment details |
 | **billing_invoices** | selltonai-modal | selltonai, backoffice | Usage invoices, totals, Stripe invoice ids, and hosted invoice links |
 | **billing_invoice_sequences** | selltonai-modal | selltonai-modal | Year-scoped reservation state for explicit Stripe invoice numbers like `SLTN-2026/100001` |
 | **usage** | selltonai-modal | selltonai, backoffice | Billable usage rows linked to generated invoices |
