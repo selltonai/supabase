@@ -11,6 +11,10 @@ CREATE INDEX IF NOT EXISTS idx_companies_useful_case_file_ids
 CREATE OR REPLACE FUNCTION public.remove_deleted_file_from_companies()
 RETURNS trigger AS $$
 BEGIN
+  IF current_setting('sellton.skip_file_delete_company_cleanup', true) = 'on' THEN
+    RETURN NULL;
+  END IF;
+
   UPDATE public.companies
      SET useful_case_file_ids = array_remove(useful_case_file_ids, OLD.id),
          updated_at = NOW()
@@ -45,6 +49,8 @@ BEGIN
          updated_at = NOW()
    WHERE organization_id = p_organization_id
      AND useful_case_file_ids @> ARRAY[p_file_id]::uuid[];
+
+  PERFORM set_config('sellton.skip_file_delete_company_cleanup', 'on', true);
 
   DELETE FROM public.organization_files
    WHERE id = p_file_id
