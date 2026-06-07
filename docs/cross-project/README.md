@@ -82,6 +82,32 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 | **billing_invoice_sequences** | selltonai-modal | selltonai-modal | Year-scoped reservation state for explicit Stripe invoice numbers like `SLTN-2026/100001` |
 | **usage** | selltonai-modal | selltonai, backoffice | Billable usage rows linked to generated invoices |
 
+Billing work-access overrides live on the singular `organization` table because some workspaces do not have `billing_customers` rows yet. Backoffice writes the override fields, while `selltonai-modal` and `selltonai` enforce the effective decision.
+
+```sql
+work_access_mode text not null default 'auto'
+work_access_reason text
+work_access_until timestamptz
+work_access_updated_by text
+work_access_updated_at timestamptz
+```
+
+Allowed `work_access_mode` values:
+
+- `auto`: follow billing and spend-limit automation.
+- `force_allow`: allow billable/outbound work even when billing is suspended.
+- `force_block`: block billable/outbound work even when billing is healthy.
+
+The legacy dispatch mirror remains on `organization`:
+
+```sql
+dispatch_suspended boolean
+dispatch_suspended_reason text
+dispatch_suspended_at timestamptz
+```
+
+During staggered environment upgrades, readers must tolerate missing `work_access_*` columns and fall back to the legacy dispatch fields.
+
 ### ICP & Settings Tables
 
 | Table | Primary Writer | Primary Readers | Purpose |
