@@ -11,8 +11,12 @@
 
 ## 📚 Documentation
 
-### Internal Architecture
-- 🔲 ai-context/ (TODO - create when needed)
+### Internal Architecture (ai-context/)
+- ✅ [architecture.md](docs/ai-context/architecture.md) - System architecture, schema design, RLS patterns
+- ✅ [data-models.md](docs/ai-context/data-models.md) - Complete database schema reference
+- ✅ [api-contracts.md](docs/ai-context/api-contracts.md) - REST, Realtime, Storage, RPC contracts
+- ✅ [supabase-patterns.md](docs/ai-context/supabase-patterns.md) - Supabase/CLI patterns, migrations, RLS, indexing
+- ✅ [decisions.md](docs/ai-context/decisions.md) - Architecture Decision Records (ADRs)
 
 ### External Service Contracts
 - ✅ [docs/cross-project/README.md](docs/cross-project/README.md) - **Critical**: Table ownership matrix
@@ -82,5 +86,5 @@ Treat schema work as cross-project by default.
 
 ---
 
-**Last Updated**: April 6, 2026
+**Last Updated**: June 14, 2026
 **External Contracts**: [docs/cross-project/README.md](docs/cross-project/README.md) - Table ownership matrix
