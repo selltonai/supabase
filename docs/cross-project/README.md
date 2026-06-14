@@ -37,6 +37,10 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 | **organizations** | selltonai-onboard | All | Organization accounts |
 | **users** | selltonai-onboard | All | User accounts |
 | **user_organizations** | selltonai-onboard | All | User-org membership |
+| **internal_support_users** | backoffice | selltonai-modal | Internal staff identities excluded from customer billing |
+| **support_workspace_sessions** | backoffice | selltonai, backoffice | Short-lived non-member support access sessions |
+| **support_audit_events** | selltonai, backoffice | backoffice | Audit log for support access and actions |
+| **support_resource_locks** | selltonai, backoffice | selltonai, backoffice | Optional edit locks for risky support writes |
 | **organization_settings** | backoffice | All | Per-org settings |
 
 ### Campaign & Company Tables
