@@ -112,6 +112,11 @@ dispatch_suspended_at timestamptz
 
 During staggered environment upgrades, readers must tolerate missing `work_access_*` columns and fall back to the legacy dispatch fields.
 
+Backoffice reads `backoffice_billing_workspace_rollup_v1(p_start, p_end)` for the `/billing`
+workspace list when available. The function is additive and returns one row per workspace with
+usage, uninvoiced usage, invoices, billing customer state, and organization work-access fields for a
+selected period.
+
 ### ICP & Settings Tables
 
 | Table | Primary Writer | Primary Readers | Purpose |
