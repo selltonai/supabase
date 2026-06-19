@@ -200,7 +200,9 @@ The database uses **PostgreSQL 15** with **Supabase** enhancements, including:
 | `created_at` | timestamptz | DEFAULT now() | Creation timestamp | ✅ |
 | `updated_at` | timestamptz | DEFAULT now() | Last update timestamp | ✅ |
 
-**Status Values**: `draft`, `active`, `paused`, `completed`
+**Status Values**: `draft`, `active`, `paused`, `discovery_completed`, `completed` (legacy final), `fully_completed`, `cancelled`
+
+`discovery_completed` means AI-Ark/lookalike discovery and company processing are exhausted while outreach follow-ups may still run. `fully_completed` is the final state after follow-up sequences and open campaign tasks are drained.
 
 **Lead Source Values**: `csv`, `template_csv`, `crm_list`, `manual`, `b2b_search`, `research`
 
@@ -1115,7 +1117,7 @@ CREATE TYPE email_search_status AS ENUM (
 |------|--------|
 | `record_type` | `unknown`, `company`, `person` |
 | `import_status` | `raw`, `extracted`, `failed` |
-| `campaign_status` | `draft`, `active`, `paused`, `completed` |
+| `campaign_status` | `draft`, `active`, `paused`, `discovery_completed`, `completed`, `fully_completed`, `cancelled` |
 | `lead_source` | `csv`, `template_csv`, `crm_list`, `manual`, `b2b_search`, `research` |
 | `priority` | `low`, `normal`, `high`, `urgent` |
 

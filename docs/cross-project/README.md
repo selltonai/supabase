@@ -164,7 +164,7 @@ CREATE TABLE campaigns (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id text NOT NULL REFERENCES organizations(id),
   name text NOT NULL,
-  status text DEFAULT 'draft' CHECK (status IN ('draft', 'active', 'paused', 'completed')),
+  status campaign_status DEFAULT 'draft',
   lead_source text CHECK (lead_source IN ('csv', 'template_csv', 'crm_list', 'manual', 'b2b_search', 'research')),
   total_companies integer DEFAULT 0,
   -- ... many more fields
@@ -176,6 +176,8 @@ CREATE TABLE campaigns (
 **Written by**: selltonai-modal (CRUD)  
 **Read by**: selltonai (display), backoffice (oversight)  
 **Critical Fields**: `status`, `lead_source`, `total_companies` - must be kept current
+
+**Status Values**: `draft`, `active`, `paused`, `discovery_completed`, `completed` (legacy final), `fully_completed`, `cancelled`
 
 ---
 

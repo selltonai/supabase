@@ -490,7 +490,7 @@ WHERE icp_score->>'grade' = 'A';
 | `email_search_status` | search_not_started, searching, finished_searching_email | Email search state |
 | `import_status` | raw, extracted, failed | CRM import status |
 | `record_type` | unknown, company, person | CRM record classification |
-| `campaign_status` | draft, active, paused, completed | Campaign status |
+| `campaign_status` | draft, active, paused, discovery_completed, completed, fully_completed, cancelled | Campaign status |
 
 ### Adding New Enums
 

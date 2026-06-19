@@ -740,7 +740,7 @@ ALTER TYPE company_processing_status ADD VALUE 'new_status';
 | email_search_status | search_not_started, searching, finished_searching_email | contacts |
 | import_status | raw, extracted, failed | crm_raw_records |
 | record_type | unknown, company, person | crm_raw_records |
-| campaign_status | draft, active, paused, completed | campaigns |
+| campaign_status | draft, active, paused, discovery_completed, completed, fully_completed, cancelled | campaigns |
 
 ---
 
