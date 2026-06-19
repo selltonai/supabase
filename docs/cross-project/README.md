@@ -86,6 +86,8 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 | **billing_invoice_sequences** | selltonai-modal | selltonai-modal | Year-scoped reservation state for explicit Stripe invoice numbers like `SLTN-2026/100001` |
 | **usage** | selltonai-modal | selltonai, backoffice | Billable usage rows linked to generated invoices |
 
+`billing_customers.auto_charge_enabled=false` marks a workspace as non-billable in Stripe. `selltonai-modal` must skip scheduled invoices, bill-now, and manual invoice payment while the flag is false. Usage rows remain unstamped/uninvoiced so monthly spend-limit enforcement can still block work when the configured limit is reached.
+
 Billing work-access overrides live on the singular `organization` table because some workspaces do not have `billing_customers` rows yet. Backoffice writes the override fields, while `selltonai-modal` and `selltonai` enforce the effective decision.
 
 ```sql
