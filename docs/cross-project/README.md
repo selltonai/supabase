@@ -166,6 +166,7 @@ CREATE TABLE campaigns (
   name text NOT NULL,
   status campaign_status DEFAULT 'draft',
   lead_source text CHECK (lead_source IN ('csv', 'template_csv', 'crm_list', 'manual', 'b2b_search', 'research')),
+  allow_competitor_outreach boolean DEFAULT false,
   total_companies integer DEFAULT 0,
   -- ... many more fields
   created_at timestamptz DEFAULT now(),
@@ -175,7 +176,9 @@ CREATE TABLE campaigns (
 
 **Written by**: selltonai-modal (CRUD)  
 **Read by**: selltonai (display), backoffice (oversight)  
-**Critical Fields**: `status`, `lead_source`, `total_companies` - must be kept current
+**Critical Fields**: `status`, `lead_source`, `total_companies`, `allow_competitor_outreach` - must be kept current
+
+`allow_competitor_outreach=false` means `selltonai-modal` must mark detected competitor companies and skip task/email drafting. Turning it on requeues previously blocked competitor companies linked to the campaign.
 
 **Status Values**: `draft`, `active`, `paused`, `discovery_completed`, `completed` (legacy final), `fully_completed`, `cancelled`
 
@@ -189,6 +192,10 @@ CREATE TABLE companies (
   organization_id text NOT NULL REFERENCES organizations(id),
   name text NOT NULL,
   processing_status text DEFAULT 'scheduled' CHECK (processing_status IN ('scheduled', 'processing', 'processed', 'failed', 'blocked_by_icp', 'imported')),
+  is_competitor boolean DEFAULT false,
+  competitor_detection_source text,
+  competitor_detection_reason text,
+  competitor_detection_confidence numeric(4,3),
   crm_list_id text,  -- From CRM import
   -- ... enrichment fields (JSONB)
   created_at timestamptz DEFAULT now(),
@@ -199,6 +206,8 @@ CREATE TABLE companies (
 **Written by**: selltonai-modal (CRUD), selltonai-crawler (enrichment updates)  
 **Read by**: selltonai (display), backoffice (oversight)  
 **Unique**: `(organization_id, name)` for upsert operations
+
+Competitor classification lives on `companies`. `is_competitor=true` is global to the organization, while `campaigns.allow_competitor_outreach` decides whether a campaign may process those companies.
 
 ---
 
