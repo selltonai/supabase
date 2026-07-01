@@ -178,7 +178,7 @@ CREATE TABLE campaigns (
 **Read by**: selltonai (display), backoffice (oversight)  
 **Critical Fields**: `status`, `lead_source`, `total_companies`, `allow_competitor_outreach` - must be kept current
 
-`allow_competitor_outreach=false` means `selltonai-modal` must mark detected competitor companies and skip task/email drafting. Turning it on requeues previously blocked competitor companies linked to the campaign.
+Competitor exclusion is always active. `allow_competitor_outreach` remains as a deprecated compatibility column and must stay `false`; `selltonai-modal` marks detected competitor companies and skips task/email drafting.
 
 **Status Values**: `draft`, `active`, `paused`, `discovery_completed`, `completed` (legacy final), `fully_completed`, `cancelled`
 
@@ -207,7 +207,7 @@ CREATE TABLE companies (
 **Read by**: selltonai (display), backoffice (oversight)  
 **Unique**: `(organization_id, name)` for upsert operations
 
-Competitor classification lives on `companies`. `is_competitor=true` is global to the organization, while `campaigns.allow_competitor_outreach` decides whether a campaign may process those companies.
+Competitor classification lives on `companies`. `is_competitor=true` is global to the organization, and campaigns must always skip those companies for outreach.
 
 ---
 

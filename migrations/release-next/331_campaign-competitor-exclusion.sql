@@ -1,8 +1,8 @@
 -- Add campaign-level competitor outreach control and company competitor classification.
 --
 -- Projects depending on this:
--- - selltonai writes campaigns.allow_competitor_outreach from campaign setup/edit flows.
--- - selltonai-modal reads the flag before task creation and writes companies.is_competitor metadata.
+-- - selltonai keeps campaigns.allow_competitor_outreach=false from campaign setup/edit flows.
+-- - selltonai-modal writes companies.is_competitor metadata and skips detected competitors.
 --
 -- Application compatibility:
 -- - Safe/idempotent. Defaults preserve existing behavior by excluding detected competitors.
@@ -51,7 +51,7 @@ CREATE INDEX IF NOT EXISTS idx_companies_competitor_requeue
   WHERE is_competitor = true;
 
 COMMENT ON COLUMN public.campaigns.allow_competitor_outreach IS
-  'When false, companies detected as competitors are marked and skipped before outreach task creation. When true, marked competitors may be processed.';
+  'Deprecated compatibility flag. Competitor exclusion is always active; detected competitors are marked and skipped before outreach task creation.';
 
 COMMENT ON COLUMN public.companies.is_competitor IS
   'True when ICP/company-fit analysis classified the company as a direct or indirect competitor for campaign outreach.';
