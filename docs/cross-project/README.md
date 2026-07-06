@@ -126,15 +126,32 @@ selected period.
 | **organization_icp_linkedin_urls** | selltonai-modal | selltonai | ICP URL lists |
 | **style_guidelines** | selltonai-modal | selltonai | Writing style guidelines |
 | **deep_research_settings** | selltonai-modal | selltonai | Research provider settings |
+| **prompts** | backoffice, selltonai-modal sync script | selltonai-modal, backoffice | Global master Jinja prompt templates |
+| **org_prompt_overrides** | backoffice | selltonai-modal, backoffice | Optional per-workspace prompt override content |
+| **prompt_revisions** | backoffice | backoffice | Prompt edit snapshots for audit and rollback |
+
+Prompt resolution in `selltonai-modal` is override → master → checked-in file fallback.
+Master prompts are workspace-independent; workspace-specific modifications live only in
+`org_prompt_overrides`.
 
 ### Onboarding Tables
 
 | Table | Primary Writer | Primary Readers | Purpose |
 |-------|---------------|-----------------|---------|
 | **onboarding_research** | selltonai-modal | selltonai | V1/V2 onboarding research state |
-| **organization_onboarding_events** | selltonai, selltonai-modal | selltonai, backoffice | Funnel transition audit log |
+| **onboarding_funnel_events** | selltonai, selltonai-modal | selltonai, backoffice | Funnel transition audit log |
+| **onboarding_reengagement_sends** | backoffice | backoffice | Idempotent onboarding lifecycle email send ledger |
+| **email_sequence_steps** | backoffice | backoffice | Configurable onboarding lifecycle email drip steps |
+| **email_suppressions** | backoffice | backoffice | Manual suppressions for lifecycle/broadcast sends |
+| **email_broadcasts** | backoffice | backoffice | Reserved operator broadcast definitions |
+| **email_broadcast_sends** | backoffice | backoffice | Reserved broadcast send ledger |
 | **avatar_interviews** | selltonai | selltonai-modal, selltonai | Retell call tracking for onboarding and sender voice |
 | **sender_voice** | selltonai-modal | selltonai | Per-user LinkedIn writing voice distilled from Retell |
+
+Backoffice drains active `email_sequence_steps` via `emails:tick`.
+`find_funnel_dropouts()` provides the base eligibility set, and Backoffice
+skips sends once `activation_paid_at` or `billing_customers.card_brand/card_last4`
+indicates the workspace reached the payment/card step.
 
 ---
 
