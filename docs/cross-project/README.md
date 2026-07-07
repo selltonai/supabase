@@ -126,15 +126,32 @@ selected period.
 | **organization_icp_linkedin_urls** | selltonai-modal | selltonai | ICP URL lists |
 | **style_guidelines** | selltonai-modal | selltonai | Writing style guidelines |
 | **deep_research_settings** | selltonai-modal | selltonai | Research provider settings |
+| **prompts** | backoffice, selltonai-modal sync script | selltonai-modal, backoffice | Global master Jinja prompt templates |
+| **org_prompt_overrides** | backoffice | selltonai-modal, backoffice | Optional per-workspace prompt override content |
+| **prompt_revisions** | backoffice | backoffice | Prompt edit snapshots for audit and rollback |
+
+Prompt resolution in `selltonai-modal` is override → master → checked-in file fallback.
+Master prompts are workspace-independent; workspace-specific modifications live only in
+`org_prompt_overrides`.
 
 ### Onboarding Tables
 
 | Table | Primary Writer | Primary Readers | Purpose |
 |-------|---------------|-----------------|---------|
 | **onboarding_research** | selltonai-modal | selltonai | V1/V2 onboarding research state |
-| **organization_onboarding_events** | selltonai, selltonai-modal | selltonai, backoffice | Funnel transition audit log |
+| **onboarding_funnel_events** | selltonai, selltonai-modal | selltonai, backoffice | Funnel transition audit log |
+| **onboarding_reengagement_sends** | backoffice | backoffice | Idempotent onboarding lifecycle email send ledger |
+| **email_sequence_steps** | backoffice | backoffice | Configurable onboarding lifecycle email drip steps |
+| **email_suppressions** | backoffice | backoffice | Manual suppressions for lifecycle/broadcast sends |
+| **email_broadcasts** | backoffice | backoffice | Reserved operator broadcast definitions |
+| **email_broadcast_sends** | backoffice | backoffice | Reserved broadcast send ledger |
 | **avatar_interviews** | selltonai | selltonai-modal, selltonai | Retell call tracking for onboarding and sender voice |
 | **sender_voice** | selltonai-modal | selltonai | Per-user LinkedIn writing voice distilled from Retell |
+
+Backoffice drains active `email_sequence_steps` via `emails:tick`.
+`find_funnel_dropouts()` provides the base eligibility set, and Backoffice
+skips sends once `activation_paid_at` or `billing_customers.card_brand/card_last4`
+indicates the workspace reached the payment/card step.
 
 ---
 
@@ -166,6 +183,7 @@ CREATE TABLE campaigns (
   name text NOT NULL,
   status campaign_status DEFAULT 'draft',
   lead_source text CHECK (lead_source IN ('csv', 'template_csv', 'crm_list', 'manual', 'b2b_search', 'research')),
+  allow_competitor_outreach boolean DEFAULT false,
   total_companies integer DEFAULT 0,
   -- ... many more fields
   created_at timestamptz DEFAULT now(),
@@ -175,7 +193,9 @@ CREATE TABLE campaigns (
 
 **Written by**: selltonai-modal (CRUD)  
 **Read by**: selltonai (display), backoffice (oversight)  
-**Critical Fields**: `status`, `lead_source`, `total_companies` - must be kept current
+**Critical Fields**: `status`, `lead_source`, `total_companies`, `allow_competitor_outreach` - must be kept current
+
+Competitor exclusion is always active. `allow_competitor_outreach` remains as a deprecated compatibility column and must stay `false`; `selltonai-modal` marks detected competitor companies and skips task/email drafting.
 
 **Status Values**: `draft`, `active`, `paused`, `discovery_completed`, `completed` (legacy final), `fully_completed`, `cancelled`
 
@@ -189,6 +209,10 @@ CREATE TABLE companies (
   organization_id text NOT NULL REFERENCES organizations(id),
   name text NOT NULL,
   processing_status text DEFAULT 'scheduled' CHECK (processing_status IN ('scheduled', 'processing', 'processed', 'failed', 'blocked_by_icp', 'imported')),
+  is_competitor boolean DEFAULT false,
+  competitor_detection_source text,
+  competitor_detection_reason text,
+  competitor_detection_confidence numeric(4,3),
   crm_list_id text,  -- From CRM import
   -- ... enrichment fields (JSONB)
   created_at timestamptz DEFAULT now(),
@@ -199,6 +223,8 @@ CREATE TABLE companies (
 **Written by**: selltonai-modal (CRUD), selltonai-crawler (enrichment updates)  
 **Read by**: selltonai (display), backoffice (oversight)  
 **Unique**: `(organization_id, name)` for upsert operations
+
+Competitor classification lives on `companies`. `is_competitor=true` is global to the organization, and campaigns must always skip those companies for outreach.
 
 ---
 
