@@ -147,6 +147,9 @@ selltonai-database/supabase/
 │       ├── 999_new_feature.sql
 │       └── MANIFEST.md         # Migration manifest
 │
+├── operations/                # Checked-in operational infrastructure
+│   └── hetzner-production-live-sync/ # Temporary cloud-to-Hetzner PostgreSQL/Storage mirror and cutover
+│
 ├── node_modules/              # npm dependencies
 ├── package.json               # Dependencies and scripts
 ├── README.md                  # Project documentation
