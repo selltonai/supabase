@@ -1,5 +1,6 @@
 [Unit]
 Description=Run Sellton production Supabase Storage synchronization every two minutes
+Conflicts=sellton-storage-standby.timer
 
 [Timer]
 OnBootSec=2min
@@ -9,4 +10,3 @@ Persistent=true
 
 [Install]
 WantedBy=timers.target
-

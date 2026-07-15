@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Sellton PostgreSQL post-cutover backup every thirty minutes
+
+[Timer]
+OnActiveSec=30min
+OnUnitActiveSec=30min
+AccuracySec=30s
+Persistent=true
+Unit=sellton-postgres-backup-standby.service
+
+[Install]
+WantedBy=timers.target

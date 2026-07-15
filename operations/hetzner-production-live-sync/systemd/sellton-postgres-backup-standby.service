@@ -1,0 +1,10 @@
+[Unit]
+Description=Sellton production PostgreSQL post-cutover backup checkpoint
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/opt/sellton/live-sync/postgres-standby/postgres-standby-backup.sh

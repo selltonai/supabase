@@ -1,15 +1,15 @@
 [Unit]
-Description=Sellton production Supabase Storage cloud to Hetzner sync
+Description=Sellton production Supabase Storage Hetzner to cloud standby sync
 After=network-online.target docker.service
 Wants=network-online.target
 Requires=docker.service
-Conflicts=sellton-storage-standby.service
+Conflicts=sellton-storage-live-sync.service
 
 [Service]
 Type=oneshot
 User=root
 Group=root
-ExecStart=/opt/sellton/live-sync/storage/storage-sync-run.sh
+ExecStart=/opt/sellton/live-sync/storage-standby/storage-standby-sync-run.sh sync
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=6

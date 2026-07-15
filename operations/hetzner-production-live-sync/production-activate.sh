@@ -30,16 +30,19 @@ if systemctl is-enabled --quiet sellton-mongodb-live-mirror.service; then
   exit 1
 fi
 subscription_enabled="$(docker exec supabase-db psql -X -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -Atc "SELECT subenabled FROM pg_subscription WHERE subname='sellton_cloud_to_hetzner'")"
-if [[ "$subscription_enabled" != "f" ]]; then
+if [[ -n "$subscription_enabled" && "$subscription_enabled" != "f" ]]; then
   echo "PostgreSQL forward subscription is not disabled: ${subscription_enabled:-missing}" >&2
   exit 1
 fi
+
+/opt/sellton/live-sync/production-standby-status.sh --check
 
 expected_service_role_key="$(read_env_value "$SUPABASE_ENV" SERVICE_ROLE_KEY)"
 gmail_supabase_url="$(read_env_value "$GMAIL_ENV" SUPABASE_URL)"
 gmail_service_role_key="$(read_env_value "$GMAIL_ENV" SUPABASE_SERVICE_ROLE_KEY)"
 gmail_external_api_url="$(read_env_value "$GMAIL_ENV" EXTERNAL_API_URL)"
 gmail_google_redirect_uri="$(read_env_value "$GMAIL_ENV" GOOGLE_REDIRECT_URI)"
+gmail_pub_sub_topic="$(read_env_value "$GMAIL_ENV" PUB_SUB_TOPIC)"
 
 if [[ "$gmail_supabase_url" != "https://storagedb.sellton.ai" ]]; then
   echo "Gmail API SUPABASE_URL is not configured for Hetzner production" >&2
@@ -57,7 +60,11 @@ if [[ "$gmail_google_redirect_uri" != "https://emailapi.sellton.ai/ve/auth/googl
   echo "Gmail API GOOGLE_REDIRECT_URI is not configured for the production subdomain" >&2
   exit 1
 fi
-unset expected_service_role_key gmail_supabase_url gmail_service_role_key gmail_external_api_url gmail_google_redirect_uri
+if [[ ! "$gmail_pub_sub_topic" =~ ^projects/[^/]+/topics/[^/]+$ ]]; then
+  echo "Gmail API PUB_SUB_TOPIC must be copied from Render as a fully qualified production topic" >&2
+  exit 1
+fi
+unset expected_service_role_key gmail_supabase_url gmail_service_role_key gmail_external_api_url gmail_google_redirect_uri gmail_pub_sub_topic
 
 echo "starting the only production Gmail API scheduler"
 systemctl enable --now sellton-gmail-api-prod.service

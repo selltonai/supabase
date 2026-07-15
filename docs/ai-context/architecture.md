@@ -148,7 +148,7 @@ selltonai-database/supabase/
 │       └── MANIFEST.md         # Migration manifest
 │
 ├── operations/                # Checked-in operational infrastructure
-│   └── hetzner-production-live-sync/ # Temporary cloud-to-Hetzner PostgreSQL/Storage mirror and cutover
+│   └── hetzner-production-live-sync/ # Temporary forward migration and rollback standby operations
 │
 ├── node_modules/              # npm dependencies
 ├── package.json               # Dependencies and scripts

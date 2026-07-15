@@ -1,16 +1,16 @@
 # Hetzner Production Live Sync
 
-These operations keep the hosted production systems authoritative while copying changes one way to Hetzner:
+These operations support a single-writer production migration with continuous rollback synchronization:
 
-- PostgreSQL: native logical replication for every application table in `public`, `auth`, and `storage`.
-- Supabase Storage: two-minute object mirror.
-- MongoDB: `selltonai-gmail-api/scripts/mongodb-live-mirror.js`, which performs an initial copy and then consumes a database-wide change stream.
+- Before cutover, PostgreSQL, Storage, and MongoDB copy from the hosted providers to Hetzner.
+- During cutover, all writers are drained and the forward mirrors stop at zero lag.
+- Before the first Hetzner write, PostgreSQL, Storage, and MongoDB standby workers start from Hetzner back to the hosted providers.
 
-This is temporary migration infrastructure. It is not active-active replication and it does not run reverse synchronization after cutover.
+This is temporary migration infrastructure, not active-active replication. Exactly one side may receive application writes at a time. Schema changes remain frozen while rollback standby is active.
 
 ## Server Layout
 
-The checked-in PostgreSQL and Storage files are installed below `/opt/sellton/live-sync`. MongoDB worker code is deployed with `selltonai-gmail-api` and runs as `sellton-mongodb-live-mirror.service`.
+The checked-in PostgreSQL and Storage files are installed below `/opt/sellton/live-sync`. MongoDB worker code is deployed with `selltonai-gmail-api`. The forward and standby workers use separate mutually exclusive systemd units.
 
 Secrets remain in root-only files on Hetzner:
 
@@ -35,6 +35,8 @@ First stop the current cloud Gmail API scheduler, Modal production jobs/API, Ver
 
 The command takes a final Storage pass, verifies all three mirrors, disables PostgreSQL and Storage forward replication, synchronizes PostgreSQL sequences, stops the MongoDB mirror, and starts Hetzner Supabase. It deliberately leaves the Hetzner Gmail API stopped.
 
+It also starts and verifies the Hetzner-to-cloud PostgreSQL, Storage, and MongoDB standby workers before Hetzner application services become writable.
+
 After updating and redeploying the Vercel and Modal production environment variables, activate the only production Gmail scheduler:
 
 ```bash
@@ -42,3 +44,23 @@ After updating and redeploying the Vercel and Modal production environment varia
 ```
 
 Do not keep the cloud and Hetzner application writers active at the same time. The forward mirrors are one-way and must be stopped at zero lag before Hetzner becomes writable.
+
+## Rollback Standby
+
+Monitor the post-cutover standby:
+
+```bash
+/opt/sellton/live-sync/production-standby-status.sh --check
+```
+
+After Hetzner is accepted as primary, retire the disabled forward PostgreSQL subscription/publication so its old cloud slot cannot retain WAL:
+
+```bash
+/opt/sellton/live-sync/production-forward-retire.sh --hetzner-primary-confirmed
+```
+
+The Hetzner-to-cloud standby remains active after retirement. To return to the hosted providers, first drain all Hetzner writers, then finalize and stop the standby with:
+
+```bash
+/opt/sellton/live-sync/production-standby-disable.sh --writers-stopped
+```

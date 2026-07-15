@@ -38,7 +38,7 @@ fs.writeFileSync(filePath, contents, {mode: 0o600});
 NODE
 
 unset service_role_key
-docker compose -f "${BACKOFFICE_ROOT}/docker-compose.yml" --project-directory "$BACKOFFICE_ROOT" up -d --force-recreate backoffice
+docker compose -f "${BACKOFFICE_ROOT}/compose.yml" --project-directory "$BACKOFFICE_ROOT" up -d --force-recreate backoffice
 
 actual_url="$(docker exec backoffice-backoffice-1 printenv SUPABASE_PRODUCTION_URL)"
 if [[ "$actual_url" != "https://storagedb.sellton.ai" ]]; then

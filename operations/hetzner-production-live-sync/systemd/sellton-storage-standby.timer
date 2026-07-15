@@ -1,0 +1,13 @@
+[Unit]
+Description=Run Sellton production Hetzner-to-cloud Storage standby sync every two minutes
+Conflicts=sellton-storage-live-sync.timer
+
+[Timer]
+OnBootSec=2min
+OnActiveSec=2min
+OnUnitActiveSec=2min
+AccuracySec=15s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
