@@ -41,7 +41,7 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 | **support_workspace_sessions** | backoffice | selltonai, backoffice | Short-lived non-member support access sessions |
 | **support_audit_events** | selltonai, backoffice | backoffice | Audit log for support access and actions |
 | **support_resource_locks** | selltonai, backoffice | selltonai, backoffice | Optional edit locks for risky support writes |
-| **organization_settings** | backoffice | All | Per-org settings |
+| **organization_settings** | backoffice, selltonai | All | Per-org settings; selltonai owns CRM deal defaults |
 
 ### Campaign & Company Tables
 
@@ -53,7 +53,7 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 | **companies** | selltonai-modal, crawler | selltonai, backoffice | Company records |
 | **contacts** | selltonai-modal | selltonai, backoffice | Contact records |
 | **company_contacts** | selltonai-modal | selltonai | Company-contact relationships |
-| **tasks** | selltonai-modal | selltonai, backoffice | Verification tasks |
+| **tasks** | selltonai-modal, selltonai | selltonai, backoffice | Shared operational tasks; optional `deal_id` links CRM work |
 | **ai_ark_enrollment_runs** | selltonai-modal | backoffice | Idempotency ledger for AI-Ark enrollment recovery |
 
 ### CRM Tables
@@ -64,6 +64,33 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 | **crm_list_members** | selltonai-modal | selltonai | Manual memberships for existing contacts/companies in CRM lists |
 | **crm_raw_records** | selltonai-modal | selltonai | Raw CSV data |
 | **crm_import_jobs** | selltonai-modal | selltonai via Modal API | Durable progress for large CRM CSV imports |
+| **deals** | selltonai, database projection | selltonai, selltonai-modal, backoffice | Authoritative company-scoped CRM opportunities |
+| **deal_activities** | selltonai, selltonai-modal, database audit triggers | selltonai, selltonai-modal, backoffice | Deal audit and explicit engagement clock events |
+| **crm_deal_projection_failures** | database projection trigger/reconciliation | database operators | Failure ledger that prevents deal sync from breaking contact writes |
+
+`deals.stage` is authoritative. Contact stage events may create or advance a deal,
+but never regress it, never auto-win it, and never receive write-back from a manual
+deal move. There is at most one open deal per `(organization_id, company_id)`.
+`deal_activities.bumps_last_activity` is opt-in so system-created work cannot
+accidentally reset future nurture eligibility.
+
+CRM workflow additions:
+
+- `tasks.deal_id` is validated against the task organization, company, and
+  contact. Task creation/completion produces idempotent `task_created` /
+  `task_completed` activities; only completion bumps `last_activity_at`.
+- Open nurture work is unique per deal across `pending`, `in_progress`,
+  `scheduled`, and `in_review`; `linkedin_connect` is unique per deal forever.
+- Deal owner changes reassign all open deal tasks in the same transaction.
+- `record_crm_deal_activity_for_contact(...)` is service-role-only and projects
+  stable email/LinkedIn provider events idempotently.
+- `create_crm_deal(...)` is service-role-only and validates every organization-
+  scoped reference before manual creation.
+- Notification types `deal_created`, `deal_stage_changed`, and
+  `deal_owner_changed` are in-app-only and deduplicated. Reconciliation sets
+  `app.crm_suppress_notifications=true` to keep backfills silent.
+- Additive task enum values are `nurture_reminder`, `linkedin_connect`, and
+  `manual_outreach`; Backoffice generic task aggregation remains compatible.
 
 ### Document & Email Tables
 
@@ -329,7 +356,14 @@ CREATE TABLE tasks (
 
 ### Policy Pattern
 
-All tables enforce RLS for frontend access:
+Most browser-readable tables enforce organization-scoped RLS. Service-only tables
+still have RLS enabled but intentionally expose no `anon`/`authenticated` policy:
+all access goes through an authenticated BFF that uses the service role and applies
+the resource's finer authorization rules. `deals`, `deal_activities`, and
+`crm_deal_projection_failures` use this service-only pattern because CRM members
+must be owner-scoped in addition to organization-scoped.
+
+The common direct-browser policy pattern is:
 
 ```sql
 -- Enable RLS

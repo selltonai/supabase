@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Sellton PostgreSQL post-cutover backup weekly
+
+[Timer]
+OnCalendar=Sun *-*-* 03:00:00 UTC
+AccuracySec=5min
+Persistent=true
+Unit=sellton-postgres-backup-standby.service
+
+[Install]
+WantedBy=timers.target
