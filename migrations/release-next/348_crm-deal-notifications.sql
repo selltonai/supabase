@@ -66,8 +66,16 @@ DECLARE
     NULLIF(current_setting('app.crm_suppress_notifications', TRUE), '')::BOOLEAN,
     FALSE
   );
+  v_pipeline_enabled BOOLEAN := FALSE;
 BEGIN
-  IF v_notifications_suppressed THEN
+  SELECT COALESCE((
+    SELECT os.crm_pipeline_enabled
+    FROM public.organization_settings os
+    WHERE os.organization_id = NEW.organization_id
+  ), FALSE)
+  INTO v_pipeline_enabled;
+
+  IF v_notifications_suppressed OR NOT v_pipeline_enabled THEN
     RETURN NEW;
   END IF;
 

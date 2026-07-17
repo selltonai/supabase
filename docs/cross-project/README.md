@@ -41,7 +41,7 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 | **support_workspace_sessions** | backoffice | selltonai, backoffice | Short-lived non-member support access sessions |
 | **support_audit_events** | selltonai, backoffice | backoffice | Audit log for support access and actions |
 | **support_resource_locks** | selltonai, backoffice | selltonai, backoffice | Optional edit locks for risky support writes |
-| **organization_settings** | backoffice, selltonai | All | Per-org settings; selltonai owns CRM deal defaults |
+| **organization_settings** | backoffice, selltonai | All | Per-org settings; selltonai owns CRM deal defaults and the database notification rollout switch |
 
 ### Campaign & Company Tables
 
@@ -82,13 +82,20 @@ CRM workflow additions:
 - Open nurture work is unique per deal across `pending`, `in_progress`,
   `scheduled`, and `in_review`; `linkedin_connect` is unique per deal forever.
 - Deal owner changes reassign all open deal tasks in the same transaction.
+- Closing a deal cancels its open nurture, LinkedIn-connect, and manual-outreach
+  tasks. Removing an owner leaves open tasks explicitly unassigned.
 - `record_crm_deal_activity_for_contact(...)` is service-role-only and projects
   stable email/LinkedIn provider events idempotently.
 - `create_crm_deal(...)` is service-role-only and validates every organization-
   scoped reference before manual creation.
 - Notification types `deal_created`, `deal_stage_changed`, and
   `deal_owner_changed` are in-app-only and deduplicated. Reconciliation sets
-  `app.crm_suppress_notifications=true` to keep backfills silent.
+  `app.crm_suppress_notifications=true` to keep backfills silent. Lifecycle
+  notifications remain dark until
+  `organization_settings.crm_pipeline_enabled=true` for that organization.
+- Reconciliation applies a 13-day activity floor before nurture can scan the
+  historical backlog and then chooses the highest-stage active company contact
+  as the deal primary.
 - Additive task enum values are `nurture_reminder`, `linkedin_connect`, and
   `manual_outreach`; Backoffice generic task aggregation remains compatible.
 

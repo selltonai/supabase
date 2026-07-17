@@ -112,7 +112,8 @@ CREATE INDEX IF NOT EXISTS idx_deal_activities_org_created
 
 ALTER TABLE public.organization_settings
   ADD COLUMN IF NOT EXISTS default_deal_amount NUMERIC(14, 2),
-  ADD COLUMN IF NOT EXISTS default_deal_currency TEXT NOT NULL DEFAULT 'USD';
+  ADD COLUMN IF NOT EXISTS default_deal_currency TEXT NOT NULL DEFAULT 'USD',
+  ADD COLUMN IF NOT EXISTS crm_pipeline_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 
 DO $$
 BEGIN
@@ -513,6 +514,9 @@ COMMENT ON TABLE public.deal_activities IS
 COMMENT ON COLUMN public.deals.source_campaign_id IS
   'Nullable deterministic attribution. Never populated from an arbitrary latest campaign.';
 
+COMMENT ON COLUMN public.organization_settings.crm_pipeline_enabled IS
+  'Database-side dark-launch switch for CRM deal lifecycle notifications. Deal projection remains active while false.';
+
 COMMENT ON COLUMN public.deals.stage_contact_id IS
   'Contact whose event most recently caused an automatic deal-stage change.';
 
@@ -523,7 +527,8 @@ COMMENT ON FUNCTION public.update_crm_deal(UUID, TEXT, TEXT, JSONB) IS
 -- SELECT relname, relrowsecurity FROM pg_class WHERE relname IN ('deals', 'deal_activities');
 -- SELECT indexname FROM pg_indexes WHERE tablename = 'deals' ORDER BY indexname;
 -- SELECT column_name FROM information_schema.columns
---   WHERE table_name = 'organization_settings' AND column_name LIKE 'default_deal_%';
+--   WHERE table_name = 'organization_settings'
+--     AND (column_name LIKE 'default_deal_%' OR column_name = 'crm_pipeline_enabled');
 --
 -- Rollback (application code must be rolled back first):
 -- DROP FUNCTION IF EXISTS public.update_crm_deal(UUID, TEXT, TEXT, JSONB);
@@ -531,4 +536,5 @@ COMMENT ON FUNCTION public.update_crm_deal(UUID, TEXT, TEXT, JSONB) IS
 -- DROP TABLE IF EXISTS public.deals CASCADE;
 -- ALTER TABLE public.organization_settings
 --   DROP COLUMN IF EXISTS default_deal_amount,
---   DROP COLUMN IF EXISTS default_deal_currency;
+--   DROP COLUMN IF EXISTS default_deal_currency,
+--   DROP COLUMN IF EXISTS crm_pipeline_enabled;

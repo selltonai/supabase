@@ -18,8 +18,8 @@ VALUES
   ('user_crm_workflow_owner_one', 'org_crm_workflow_validation'),
   ('user_crm_workflow_owner_two', 'org_crm_workflow_validation');
 
-INSERT INTO public.organization_settings (organization_id, default_deal_amount, default_deal_currency)
-VALUES ('org_crm_workflow_validation', 12000, 'USD');
+INSERT INTO public.organization_settings (organization_id, default_deal_amount, default_deal_currency, crm_pipeline_enabled)
+VALUES ('org_crm_workflow_validation', 12000, 'USD', TRUE);
 
 INSERT INTO public.companies (id, organization_id, name)
 VALUES ('11000000-0000-0000-0000-000000000001', 'org_crm_workflow_validation', 'Workflow Company');
@@ -89,6 +89,56 @@ BEGIN
   END IF;
 END
 $$;
+
+UPDATE public.organization_settings
+SET crm_pipeline_enabled = FALSE
+WHERE organization_id = 'org_crm_workflow_validation';
+
+UPDATE public.contacts
+SET pipeline_stage = 'APPOINTMENT_SCHEDULED', stage_updated_at = NOW()
+WHERE id = '21000000-0000-0000-0000-000000000001';
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM public.notifications
+    WHERE organization_id = 'org_crm_workflow_validation'
+      AND type = 'deal_stage_changed'
+      AND metadata->>'stage' = 'MEETING_BOOKED'
+  ) THEN
+    RAISE EXCEPTION 'Dark pipeline unexpectedly emitted a lifecycle notification';
+  END IF;
+END
+$$;
+
+UPDATE public.organization_settings
+SET crm_pipeline_enabled = TRUE
+WHERE organization_id = 'org_crm_workflow_validation';
+
+DELETE FROM public.organization_settings
+WHERE organization_id = 'org_crm_workflow_validation';
+
+UPDATE public.contacts
+SET pipeline_stage = 'PRESENTATION_SCHEDULED', stage_updated_at = NOW()
+WHERE id = '21000000-0000-0000-0000-000000000001';
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM public.notifications
+    WHERE organization_id = 'org_crm_workflow_validation'
+      AND type = 'deal_stage_changed'
+      AND metadata->>'stage' = 'PRESENTATION'
+  ) THEN
+    RAISE EXCEPTION 'Missing pipeline settings unexpectedly emitted a lifecycle notification';
+  END IF;
+END
+$$;
+
+INSERT INTO public.organization_settings (organization_id, default_deal_amount, default_deal_currency, crm_pipeline_enabled)
+VALUES ('org_crm_workflow_validation', 12000, 'USD', TRUE);
 
 UPDATE public.deals
 SET last_activity_at = NOW() - INTERVAL '20 days'
