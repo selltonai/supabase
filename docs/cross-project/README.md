@@ -34,8 +34,8 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 
 | Table | Primary Writer | Primary Readers | Purpose |
 |-------|---------------|-----------------|---------|
-| **organizations** | selltonai-onboard | All | Organization accounts |
-| **users** | selltonai-onboard | All | User accounts |
+| **organization** | selltonai-onboard | All | Organization accounts |
+| **user** | selltonai-onboard | All | Canonical user identities and email addresses |
 | **user_organizations** | selltonai-onboard | All | User-org membership |
 | **internal_support_users** | backoffice | selltonai-modal | Internal staff identities excluded from customer billing |
 | **support_workspace_sessions** | backoffice | selltonai, backoffice | Short-lived non-member support access sessions |
@@ -157,10 +157,14 @@ indicates the workspace reached the payment/card step.
 
 ## Schema Contracts
 
-### organizations
+The canonical core tables use the singular names `organization` and `user`. The membership join
+table remains plural as `user_organizations`. Consumers must not substitute plural
+`organizations` or `users` endpoints: those relations do not exist in production.
+
+### organization
 
 ```sql
-CREATE TABLE organizations (
+CREATE TABLE organization (
   id text PRIMARY KEY,  -- Clerk org ID
   name text NOT NULL,
   created_at timestamptz DEFAULT now(),
@@ -179,7 +183,7 @@ CREATE TABLE organizations (
 ```sql
 CREATE TABLE campaigns (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  organization_id text NOT NULL REFERENCES organizations(id),
+  organization_id text NOT NULL REFERENCES organization(id),
   name text NOT NULL,
   status campaign_status DEFAULT 'draft',
   lead_source text CHECK (lead_source IN ('csv', 'template_csv', 'crm_list', 'manual', 'b2b_search', 'research')),
