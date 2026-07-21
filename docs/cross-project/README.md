@@ -149,9 +149,13 @@ Master prompts are workspace-independent; workspace-specific modifications live 
 | **sender_voice** | selltonai-modal | selltonai | Per-user LinkedIn writing voice distilled from Retell |
 
 Backoffice drains active `email_sequence_steps` via `emails:tick`.
-`find_funnel_dropouts()` provides the base eligibility set, and Backoffice
-skips sends once `activation_paid_at` or `billing_customers.card_brand/card_last4`
-indicates the workspace reached the payment/card step.
+Migration `344_email-sequence-audience-mode.sql` adds `audience_mode` with
+`not_activated` as the default for existing and new rows. In this mode Backoffice
+targets every workspace old enough for the step while `activation_paid_at` is
+null and no `billing_customers.card_brand/card_last4` exists. The optional
+`funnel_stage` mode preserves `find_funnel_dropouts()` targeting. Both modes use
+`onboarding_reengagement_sends` for per-workspace/step idempotency and honor
+`email_suppressions` before delivery.
 
 ---
 
@@ -563,6 +567,24 @@ queued → importing/raw_import → processing/classification
 ---
 
 ## Backup & Recovery
+
+### Hetzner migration runner
+
+Self-hosted stage and production PostgreSQL migrations use the explicit operator runner in
+`operations/hetzner-migrations/`. Operators pass the exact ordered SQL paths from the checked-out
+branch; the runner never scans by numeric prefix because migration numbers collide between branches.
+
+```bash
+./operations/hetzner-migrations/migrate.sh status stage
+./operations/hetzner-migrations/migrate.sh plan stage migrations/release_1.3.0/344_email-sequence-audience-mode.sql
+./operations/hetzner-migrations/migrate.sh apply stage migrations/release_1.3.0/344_email-sequence-audience-mode.sql
+```
+
+Migration identity is full repository path plus SHA-256. Applies use `supabase_admin`, take and
+validate a full backup, lock per environment, transact each migration together with its private
+ledger entry, and notify PostgREST after success. Production additionally requires
+`--confirm-production` and refuses schema changes during active logical-replication/standby windows.
+See `operations/hetzner-migrations/README.md` for the production command and safety contract.
 
 ### Automated Backups
 
