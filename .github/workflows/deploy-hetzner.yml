@@ -1,0 +1,108 @@
+name: Deploy Supabase migrations to Hetzner
+
+on:
+  push:
+    branches:
+      - main
+      - stage
+    paths:
+      - ".github/workflows/deploy-hetzner.yml"
+      - "migrations/**/*.sql"
+      - "operations/hetzner-migrations/**"
+  workflow_dispatch:
+
+concurrency:
+  group: supabase-migrations-hetzner-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: Migrate ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    environment:
+      name: ${{ github.ref_name == 'main' && 'production' || 'stage' }}
+    env:
+      HETZNER_SSH_HOST: ${{ vars.HETZNER_SSH_HOST || '46.224.151.84' }}
+      HETZNER_SSH_USER: ${{ vars.HETZNER_SSH_USER || 'root' }}
+      HETZNER_SSH_KEY: ${{ runner.temp }}/hetzner-migrations
+      HETZNER_KNOWN_HOSTS: ${{ github.workspace }}/operations/hetzner-migrations/known_hosts
+      HETZNER_MIGRATION_ACTOR: github-actions@${{ github.run_id }}
+
+    steps:
+      - name: Select migration target
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          case "$GITHUB_REF_NAME" in
+            main)
+              echo "environment=production" >> "$GITHUB_OUTPUT"
+              ;;
+            stage)
+              echo "environment=stage" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unsupported deployment branch: $GITHUB_REF_NAME" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Checkout migration source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Pin local deployment branch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git checkout -B "$GITHUB_REF_NAME" "$GITHUB_SHA"
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+
+      - name: Configure SSH
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.HETZNER_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$SSH_PRIVATE_KEY" ]]; then
+            echo "HETZNER_SSH_PRIVATE_KEY must be configured in the GitHub Environment." >&2
+            exit 1
+          fi
+          if ! ssh-keygen -F "$HETZNER_SSH_HOST" -f "$HETZNER_KNOWN_HOSTS" >/dev/null; then
+            echo "The pinned known_hosts file has no entry for $HETZNER_SSH_HOST." >&2
+            exit 1
+          fi
+
+          install -m 600 /dev/null "$HETZNER_SSH_KEY"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HETZNER_SSH_KEY"
+
+      - name: Plan and apply migrations
+        id: migration
+        shell: bash
+        env:
+          TARGET_ENVIRONMENT: ${{ steps.target.outputs.environment }}
+        run: |
+          set -euo pipefail
+          ./operations/hetzner-migrations/deploy-from-manifest.sh "$TARGET_ENVIRONMENT"
+
+      - name: Migration summary
+        shell: bash
+        env:
+          TARGET_ENVIRONMENT: ${{ steps.target.outputs.environment }}
+        run: |
+          {
+            echo "### Supabase migration deployment"
+            echo
+            echo "- Environment: \`$TARGET_ENVIRONMENT\`"
+            echo "- Branch: \`$GITHUB_REF_NAME\`"
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- Manifest: \`operations/hetzner-migrations/deploy-manifest.txt\`"
+          } >> "$GITHUB_STEP_SUMMARY"

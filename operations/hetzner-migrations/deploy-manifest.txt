@@ -1,0 +1,3 @@
+# Ordered PostgreSQL migrations deployed automatically by the stage and main branches.
+# Add each new migration once, using its repository-relative path. Never reorder applied entries.
+migrations/release_1.3.0/344_email-sequence-audience-mode.sql
