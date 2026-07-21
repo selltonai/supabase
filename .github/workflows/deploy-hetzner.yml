@@ -27,8 +27,6 @@ jobs:
     env:
       HETZNER_SSH_HOST: ${{ vars.HETZNER_SSH_HOST || '46.224.151.84' }}
       HETZNER_SSH_USER: ${{ vars.HETZNER_SSH_USER || 'root' }}
-      HETZNER_SSH_KEY: ${{ runner.temp }}/hetzner-migrations
-      HETZNER_KNOWN_HOSTS: ${{ github.workspace }}/operations/hetzner-migrations/known_hosts
       HETZNER_MIGRATION_ACTOR: github-actions@${{ github.run_id }}
 
     steps:
@@ -72,17 +70,22 @@ jobs:
         run: |
           set -euo pipefail
 
+          ssh_key="$RUNNER_TEMP/hetzner-migrations"
+          known_hosts="$GITHUB_WORKSPACE/operations/hetzner-migrations/known_hosts"
+
           if [[ -z "$SSH_PRIVATE_KEY" ]]; then
             echo "HETZNER_SSH_PRIVATE_KEY must be configured in the GitHub Environment." >&2
             exit 1
           fi
-          if ! ssh-keygen -F "$HETZNER_SSH_HOST" -f "$HETZNER_KNOWN_HOSTS" >/dev/null; then
+          if ! ssh-keygen -F "$HETZNER_SSH_HOST" -f "$known_hosts" >/dev/null; then
             echo "The pinned known_hosts file has no entry for $HETZNER_SSH_HOST." >&2
             exit 1
           fi
 
-          install -m 600 /dev/null "$HETZNER_SSH_KEY"
-          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HETZNER_SSH_KEY"
+          install -m 600 /dev/null "$ssh_key"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_key"
+          printf 'HETZNER_SSH_KEY=%s\n' "$ssh_key" >> "$GITHUB_ENV"
+          printf 'HETZNER_KNOWN_HOSTS=%s\n' "$known_hosts" >> "$GITHUB_ENV"
 
       - name: Plan and apply migrations
         id: migration
