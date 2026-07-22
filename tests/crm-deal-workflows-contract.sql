@@ -140,6 +140,75 @@ $$;
 INSERT INTO public.organization_settings (organization_id, default_deal_amount, default_deal_currency, crm_pipeline_enabled)
 VALUES ('org_crm_workflow_validation', 12000, 'USD', TRUE);
 
+DO $$
+DECLARE
+  v_deal_id UUID;
+  v_last_activity_at TIMESTAMPTZ;
+  v_snoozed_until TIMESTAMPTZ := NOW() + INTERVAL '3 months';
+BEGIN
+  IF (SELECT crm_automation_enabled FROM public.organization_settings WHERE organization_id = 'org_crm_workflow_validation') THEN
+    RAISE EXCEPTION 'CRM automation must default to disabled';
+  END IF;
+
+  SELECT id, last_activity_at
+  INTO STRICT v_deal_id, v_last_activity_at
+  FROM public.deals
+  WHERE organization_id = 'org_crm_workflow_validation';
+
+  PERFORM public.set_crm_deal_snooze(
+    v_deal_id,
+    'org_crm_workflow_validation',
+    'user_crm_workflow_owner_one',
+    v_snoozed_until
+  );
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.deals
+    WHERE id = v_deal_id
+      AND snoozed_until = v_snoozed_until
+      AND last_activity_at = v_last_activity_at
+  ) THEN
+    RAISE EXCEPTION 'Deal snooze was not stored without bumping activity';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.deal_activities
+    WHERE deal_id = v_deal_id
+      AND activity_type = 'snooze_change'
+      AND actor = 'user'
+      AND actor_user_id = 'user_crm_workflow_owner_one'
+      AND metadata->>'to' IS NOT NULL
+  ) THEN
+    RAISE EXCEPTION 'Deal snooze audit was not created';
+  END IF;
+
+  BEGIN
+    PERFORM public.set_crm_deal_snooze(
+      v_deal_id,
+      'org_crm_workflow_validation',
+      'user_outside_crm_workflow_org',
+      NULL
+    );
+    RAISE EXCEPTION 'Non-member deal snooze unexpectedly succeeded';
+  EXCEPTION
+    WHEN check_violation THEN NULL;
+  END;
+
+  PERFORM public.set_crm_deal_snooze(
+    v_deal_id,
+    'org_crm_workflow_validation',
+    'user_crm_workflow_owner_one',
+    NULL
+  );
+
+  IF EXISTS (SELECT 1 FROM public.deals WHERE id = v_deal_id AND snoozed_until IS NOT NULL) THEN
+    RAISE EXCEPTION 'Deal unsnooze did not clear snoozed_until';
+  END IF;
+END
+$$;
+
 UPDATE public.deals
 SET last_activity_at = NOW() - INTERVAL '20 days'
 WHERE organization_id = 'org_crm_workflow_validation';
