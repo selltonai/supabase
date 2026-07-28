@@ -43,6 +43,11 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 | **support_resource_locks** | selltonai, backoffice | selltonai, backoffice | Optional edit locks for risky support writes |
 | **organization_settings** | backoffice, selltonai | All | Per-org settings; selltonai owns CRM deal defaults and the database notification rollout switch |
 
+`organization_settings.company_name` is the public sender identity used by
+generated outreach. `selltonai` owns the setting; `selltonai-modal` reads it
+and falls back to `organization.name` for existing workspaces where it is
+NULL or blank.
+
 ### Campaign & Company Tables
 
 | Table | Primary Writer | Primary Readers | Purpose |
