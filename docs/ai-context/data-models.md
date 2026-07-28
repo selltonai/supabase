@@ -729,6 +729,20 @@ columns on the canonical `user` identity table.
 
 ---
 
+### usage_analytics_projection_rollups and usage_analytics_projection_contributions
+
+**Primary Writer**: Database triggers on `public.usage`
+**Primary Reader**: `selltonai` through `analytics_usage_rollup_v3()`
+**Purpose**: Durable hourly/daily Usage Analytics aggregates with exact correction and delete handling
+
+`usage_analytics_projection_rollups` stores compact hourly and UTC-daily totals keyed by organization, category, campaign, user, task/model labels, and the API filters that must remain queryable. It is the interactive read model; it does not change the billable `usage` writer contract.
+
+`usage_analytics_projection_contributions` stores one normalized contribution per `usage.id`. The ledger makes historical backfill idempotent and lets update/delete triggers remove the old aggregate before adding the new one. It is an internal database table, protected by RLS, and is not a frontend query surface.
+
+`analytics_usage_rollup_v3(...)` preserves the v2 response fields (`data[]` dimensions and metric totals). It refuses requests until `complete_usage_analytics_projection_backfill()` verifies every historical `usage` row has a contribution. The required deployment order is migration → bounded backfill → completion marker → selltonai route deployment.
+
+---
+
 ## AI & Research Tables
 
 ### onboarding_research
