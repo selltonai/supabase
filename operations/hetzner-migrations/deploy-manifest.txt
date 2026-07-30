@@ -2,3 +2,4 @@
 # Add each new migration once, using its repository-relative path. Never reorder applied entries.
 migrations/release_1.3.0/344_email-sequence-audience-mode.sql
 migrations/release_1.3.0/345_usage-analytics-projection.sql
+migrations/release_1.3.0/346_crm-list-owner.sql
