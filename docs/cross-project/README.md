@@ -59,7 +59,13 @@ NULL or blank.
 | **contacts** | selltonai-modal | selltonai, backoffice | Contact records |
 | **company_contacts** | selltonai-modal | selltonai | Company-contact relationships |
 | **tasks** | selltonai-modal, selltonai | selltonai, backoffice | Shared operational tasks; optional `deal_id` links CRM work |
+| **email_reply_events** | selltonai-modal | selltonai dashboard RPC | Idempotent, PII-minimized inbound reply analytics projection |
 | **ai_ark_enrollment_runs** | selltonai-modal | backoffice | Idempotency ledger for AI-Ark enrollment recovery |
+
+`email_reply_events` is service-role-only. Its unique
+`(organization_id, dedup_key)` contract makes Gmail webhook retries safe. The
+dashboard rollup counts one first reply per campaign/thread and excludes
+conversational reply sends from the outbound denominator.
 
 ### CRM Tables
 
@@ -489,6 +495,7 @@ CREATE INDEX idx_table_name_pending ON table_name(organization_id, status)
 | companies | org_id, processing_status, campaign_id | Company filtering |
 | contacts | org_id, email, pipeline_stage | Contact search |
 | tasks | org_id, status, campaign_id | Task management |
+| email_reply_events | org_id, campaign_id, received_at | Dashboard reply conversion rollups |
 | crm_raw_records | list_id, org_id, import_status | CRM import queries |
 
 ---
