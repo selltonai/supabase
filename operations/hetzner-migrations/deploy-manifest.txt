@@ -4,3 +4,4 @@ migrations/release_1.3.0/344_email-sequence-audience-mode.sql
 migrations/release_1.3.0/345_usage-analytics-projection.sql
 migrations/release_1.3.0/346_crm-list-owner.sql
 migrations/release_1.3.0/347_campaign-created-by-admin.sql
+migrations/release_1.3.0/348_review-draft-unique-index-exclude-linkedin.sql
