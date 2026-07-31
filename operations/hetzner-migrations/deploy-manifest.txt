@@ -5,3 +5,14 @@ migrations/release_1.3.0/345_usage-analytics-projection.sql
 migrations/release_1.3.0/346_crm-list-owner.sql
 migrations/release_1.3.0/347_campaign-created-by-admin.sql
 migrations/release_1.3.0/348_review-draft-unique-index-exclude-linkedin.sql
+migrations/release_1.3.0/349_crm-deals-foundation.sql
+migrations/release_1.3.0/350_crm-deals-contact-projection.sql
+migrations/release_1.3.0/351_crm-deal-task-types.sql
+migrations/release_1.3.0/352_crm-deal-task-workflows.sql
+migrations/release_1.3.0/353_crm-deal-notifications.sql
+migrations/release_1.3.0/354_crm-deal-manual-create.sql
+migrations/release_1.3.0/355_crm-pipeline-v2-snooze-controls.sql
+migrations/release_1.3.0/356_organization-settings-company-name.sql
+migrations/release_1.3.0/357_email-batch-usage-ledger.sql
+migrations/release_1.3.0/358_add-organization-files-indexing-error-detail.sql
+migrations/release_1.3.0/359_dashboard-email-reply-events.sql
