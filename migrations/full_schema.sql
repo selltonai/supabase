@@ -3160,7 +3160,9 @@ CREATE TABLE IF NOT EXISTS "public"."organization_files" (
     "has_sensitive_data" boolean DEFAULT false,
     "sensitive_data_types" "text"[] DEFAULT '{}'::"text"[],
     "processing_status" "text" DEFAULT 'pending'::"text",
+    "error_detail" "text",
     "industries" "text"[] DEFAULT '{}'::"text"[],
+    CONSTRAINT "organization_files_error_detail_length_check" CHECK (("error_detail" IS NULL) OR (char_length("error_detail") <= 500)),
     CONSTRAINT "organization_files_processing_status_check" CHECK (("processing_status" = ANY (ARRAY['pending'::"text", 'processing'::"text", 'processed'::"text", 'error'::"text"])))
 );
 
@@ -3193,6 +3195,10 @@ COMMENT ON COLUMN "public"."organization_files"."sensitive_data_types" IS 'Array
 
 
 COMMENT ON COLUMN "public"."organization_files"."processing_status" IS 'Status of document processing: pending (not started), processing (in progress), processed (completed), error (failed)';
+
+
+
+COMMENT ON COLUMN "public"."organization_files"."error_detail" IS 'Bounded, non-secret summary of the latest document indexing failure. Cleared after a successful retry.';
 
 
 
@@ -7846,7 +7852,6 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TAB
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES  TO "anon";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES  TO "authenticated";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES  TO "service_role";
-
 
 
 

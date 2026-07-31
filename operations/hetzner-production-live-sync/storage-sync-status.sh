@@ -13,4 +13,3 @@ fi
 
 echo "storage_target_files"
 find "$TARGET_ROOT" -type f ! -name '*.partial-*' -printf '%s\n' 2>/dev/null | awk '{count += 1; bytes += $1} END {print count "|" bytes}'
-

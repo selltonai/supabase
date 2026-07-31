@@ -9,6 +9,15 @@ timestamp="$(date -u +%Y%m%d-%H%M%S)"
 backup_path="${BACKUP_ROOT}/postgres-${timestamp}.dump"
 temporary_path="${backup_path}.tmp"
 
+prune_old_backups() {
+  local retained_backup_path="$1"
+  local retained_backup_name
+  retained_backup_name="$(basename "$retained_backup_path")"
+
+  find "$BACKUP_ROOT" -maxdepth 1 -type f -name 'postgres-*.dump' ! -name "$retained_backup_name" -delete
+  find "$BACKUP_ROOT" -maxdepth 1 -type f -name 'postgres-*.dump.sha256' ! -name "${retained_backup_name}.sha256" -delete
+}
+
 install -d -m 700 "$BACKUP_ROOT"
 install -d -m 700 "$(dirname "$STATUS_FILE")"
 
@@ -19,6 +28,7 @@ if [[ -r "$STATUS_FILE" ]]; then
   if [[ "$backup_age_seconds" -ge 0 && "$backup_age_seconds" -le 600 && -s "${BACKUP_PATH:-}" && -s "${BACKUP_PATH:-}.sha256" ]]; then
     sha256sum --check "${BACKUP_PATH}.sha256" >/dev/null
     docker exec -i supabase-db pg_restore --list < "$BACKUP_PATH" >/dev/null
+    prune_old_backups "$BACKUP_PATH"
     echo "Reusing recent verified PostgreSQL checkpoint: $BACKUP_PATH"
     exit 0
   fi
@@ -40,6 +50,7 @@ docker exec supabase-db pg_dump \
 docker exec -i supabase-db pg_restore --list < "$temporary_path" >/dev/null
 mv "$temporary_path" "$backup_path"
 sha256sum "$backup_path" > "${backup_path}.sha256"
+sha256sum --check "${backup_path}.sha256" >/dev/null
 ln -sfn "$(basename "$backup_path")" "${BACKUP_ROOT}/latest.dump"
 
 cat > "${STATUS_FILE}.tmp" <<EOF
@@ -50,5 +61,7 @@ BACKUP_BYTES=$(stat -c %s "$backup_path")
 EOF
 mv "${STATUS_FILE}.tmp" "$STATUS_FILE"
 chmod 600 "$STATUS_FILE"
+
+prune_old_backups "$backup_path"
 
 echo "PostgreSQL backup checkpoint completed: $backup_path"

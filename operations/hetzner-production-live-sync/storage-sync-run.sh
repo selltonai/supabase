@@ -53,4 +53,3 @@ export STORAGE_SYNC_STATUS="$STATUS"
 export STORAGE_SYNC_CONCURRENCY="${STORAGE_SYNC_CONCURRENCY:-4}"
 
 node "${SYNC_ROOT}/storage-object-sync.js"
-

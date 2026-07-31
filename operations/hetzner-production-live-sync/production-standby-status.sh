@@ -7,6 +7,7 @@ MONGO_STATE="/var/lib/sellton-mongodb-standby/state.json"
 RETIRED_MARKER="${SYNC_ROOT}/FORWARD_REPLICATION_RETIRED"
 POSTGRES_MODE_MARKER="${SYNC_ROOT}/POSTGRES_STANDBY_MODE"
 POSTGRES_BACKUP_STATUS="${SYNC_ROOT}/postgres-standby/backup-status.env"
+POSTGRES_BACKUP_MAX_AGE_SECONDS=2700
 
 check_argument=()
 if [[ "$MODE" == "--check" ]]; then
@@ -38,9 +39,10 @@ if [[ "$postgres_mode" == "backup-only" ]]; then
   echo "postgres_backup_path=${backup_path:-missing}"
   echo "postgres_backup_bytes=$backup_bytes"
   echo "postgres_backup_age_seconds=$backup_age_seconds"
+  echo "postgres_backup_max_age_seconds=$POSTGRES_BACKUP_MAX_AGE_SECONDS"
   echo "postgres_cloud_apply=disabled; rollback requires restoring a checkpoint"
   if [[ "$MODE" == "--check" ]]; then
-    if [[ "$postgres_backup_timer" != "active" || "$postgres_backup_enabled" != "enabled" || ! -s "$backup_path" || "$backup_age_seconds" -lt 0 || "$backup_age_seconds" -gt 2700 ]]; then
+    if [[ "$postgres_backup_timer" != "active" || "$postgres_backup_enabled" != "enabled" || ! -s "$backup_path" || "$backup_age_seconds" -lt 0 || "$backup_age_seconds" -gt "$POSTGRES_BACKUP_MAX_AGE_SECONDS" ]]; then
       echo "PostgreSQL backup checkpoint is not healthy" >&2
       exit 1
     fi
