@@ -1,0 +1,18 @@
+[Unit]
+Description=Sellton production PostgreSQL Hetzner to cloud standby sync
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/opt/sellton/live-sync/postgres-standby/postgres-standby-run.sh
+ExecStop=-/usr/bin/docker stop --time 60 sellton-postgres-standby
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=75
+
+[Install]
+WantedBy=multi-user.target

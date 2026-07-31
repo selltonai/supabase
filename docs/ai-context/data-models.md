@@ -33,7 +33,11 @@ The database uses **PostgreSQL 15** with **Supabase** enhancements, including:
 
 ## Core Tables
 
-### organizations
+The canonical core tables use the singular names `organization` and `user`. The membership join
+table remains plural as `user_organizations`. Production does not expose plural `organizations`
+or `users` relations.
+
+### organization
 
 **Primary Writer**: sellton-onboard (via Clerk webhook), backoffice  
 **Primary Readers**: All services  
@@ -56,13 +60,13 @@ The database uses **PostgreSQL 15** with **Supabase** enhancements, including:
 | `updated_at` | timestamptz | DEFAULT now() | Last update timestamp | ✅ |
 
 **Indexes**:
-- PK: `organizations_pkey` ON `id`
+- PK: `organization_pkey` ON `id`
 
 **Relationships**:
 - 1:N → `campaigns`
 - 1:N → `companies`
 - 1:N → `contacts`
-- 1:N → `users` (via `user_organizations`)
+- 1:N → `user` (via `user_organizations`)
 - 1:N → `organization_settings`
 - 1:N → `organization_files`
 
@@ -74,7 +78,7 @@ The database uses **PostgreSQL 15** with **Supabase** enhancements, including:
 
 ---
 
-### users
+### user
 
 **Primary Writer**: sellton-onboard (via Clerk webhook)  
 **Primary Readers**: All services  
@@ -83,16 +87,14 @@ The database uses **PostgreSQL 15** with **Supabase** enhancements, including:
 | Column | Type | Constraints | Description | RLS |
 |--------|------|-------------|-------------|-----|
 | `id` | text | PK | User ID (Clerk user ID) | ✅ |
-| `email` | text | NOT NULL, UNIQUE | User email address | ✅ |
-| `firstname` | text | | First name | ✅ |
-| `lastname` | text | | Last name | ✅ |
-| `avatar_url` | text | | Profile picture URL | ✅ |
+| `email` | text | | User email address | ✅ |
 | `created_at` | timestamptz | DEFAULT now() | Creation timestamp | ✅ |
-| `updated_at` | timestamptz | DEFAULT now() | Last update timestamp | ✅ |
+
+Names, avatars, and other profile presentation fields belong to `user_profiles`; they are not
+columns on the canonical `user` identity table.
 
 **Indexes**:
-- PK: `users_pkey` ON `id`
-- UNIQUE: `users_email_key` ON `email`
+- PK: `user_pkey` ON `id`
 
 **RLS Policies**:
 - SELECT: Users can view their own profile or profiles in their organizations
@@ -108,8 +110,8 @@ The database uses **PostgreSQL 15** with **Supabase** enhancements, including:
 
 | Column | Type | Constraints | Description | RLS |
 |--------|------|-------------|-------------|-----|
-| `user_id` | text | PK, FK → users(id) | User reference | ✅ |
-| `organization_id` | text | PK, FK → organizations(id) | Organization reference | ✅ |
+| `user_id` | text | PK, FK → user(id) | User reference | ✅ |
+| `organization_id` | text | PK, FK → organization(id) | Organization reference | ✅ |
 | `role` | text | NOT NULL | User role in organization | ✅ |
 | `created_at` | timestamptz | DEFAULT now() | Creation timestamp | ✅ |
 
@@ -724,6 +726,20 @@ The database uses **PostgreSQL 15** with **Supabase** enhancements, including:
 | `period_start` | timestamptz | | Usage period start | ✅ |
 | `period_end` | timestamptz | | Usage period end | ✅ |
 | `created_at` | timestamptz | DEFAULT now() | Creation timestamp | ✅ |
+
+---
+
+### usage_analytics_projection_rollups and usage_analytics_projection_contributions
+
+**Primary Writer**: Database triggers on `public.usage`
+**Primary Reader**: `selltonai` through `analytics_usage_rollup_v3()`
+**Purpose**: Durable hourly/daily Usage Analytics aggregates with exact correction and delete handling
+
+`usage_analytics_projection_rollups` stores compact hourly and UTC-daily totals keyed by organization, category, campaign, user, task/model labels, and the API filters that must remain queryable. It is the interactive read model; it does not change the billable `usage` writer contract.
+
+`usage_analytics_projection_contributions` stores one normalized contribution per `usage.id`. The ledger makes historical backfill idempotent and lets update/delete triggers remove the old aggregate before adding the new one. It is an internal database table, protected by RLS, and is not a frontend query surface.
+
+`analytics_usage_rollup_v3(...)` preserves the v2 response fields (`data[]` dimensions and metric totals). It refuses requests until `complete_usage_analytics_projection_backfill()` verifies every historical `usage` row has a contribution. The required deployment order is migration → bounded backfill → completion marker → selltonai route deployment.
 
 ---
 

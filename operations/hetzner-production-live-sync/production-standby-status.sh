@@ -7,7 +7,7 @@ MONGO_STATE="/var/lib/sellton-mongodb-standby/state.json"
 RETIRED_MARKER="${SYNC_ROOT}/FORWARD_REPLICATION_RETIRED"
 POSTGRES_MODE_MARKER="${SYNC_ROOT}/POSTGRES_STANDBY_MODE"
 POSTGRES_BACKUP_STATUS="${SYNC_ROOT}/postgres-standby/backup-status.env"
-POSTGRES_BACKUP_MAX_AGE_SECONDS="$(( 8 * 24 * 60 * 60 ))"
+POSTGRES_BACKUP_MAX_AGE_SECONDS=2700
 
 check_argument=()
 if [[ "$MODE" == "--check" ]]; then

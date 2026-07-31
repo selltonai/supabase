@@ -34,8 +34,8 @@ Supabase (PostgreSQL) is the **shared database** for all Sellton services. This 
 
 | Table | Primary Writer | Primary Readers | Purpose |
 |-------|---------------|-----------------|---------|
-| **organizations** | selltonai-onboard | All | Organization accounts |
-| **users** | selltonai-onboard | All | User accounts |
+| **organization** | selltonai-onboard | All | Organization accounts |
+| **user** | selltonai-onboard | All | Canonical user identities and email addresses |
 | **user_organizations** | selltonai-onboard | All | User-org membership |
 | **internal_support_users** | backoffice | selltonai-modal | Internal staff identities excluded from customer billing |
 | **support_workspace_sessions** | backoffice | selltonai, backoffice | Short-lived non-member support access sessions |
@@ -140,6 +140,10 @@ and must contain a sanitized, non-secret failure summary.
 
 `billing_customers.auto_charge_enabled=false` marks a workspace as non-billable in Stripe. `selltonai-modal` must skip scheduled invoices, bill-now, and manual invoice payment while the flag is false. Usage rows remain unstamped/uninvoiced so monthly spend-limit enforcement can still block work when the configured limit is reached.
 
+### Usage Analytics projection
+
+Migration `345_usage-analytics-projection.sql` adds the internal, trigger-maintained `usage_analytics_projection_*` relations and `analytics_usage_rollup_v3(...)`. `selltonai` is the only interactive reader, through its authenticated `/api/analytics/usage-rollup` BFF route; `selltonai-modal` continues to write `public.usage` unchanged. The projection must be historically backfilled in bounded batches and marked complete before deploying the v3 route. The v3 function does not serve partial data or fall back to raw-row scans when that marker is absent.
+
 Billing work-access overrides live on the singular `organization` table because some workspaces do not have `billing_customers` rows yet. Backoffice writes the override fields, while `selltonai-modal` and `selltonai` enforce the effective decision.
 
 ```sql
@@ -201,18 +205,26 @@ Master prompts are workspace-independent; workspace-specific modifications live 
 | **sender_voice** | selltonai-modal | selltonai | Per-user LinkedIn writing voice distilled from Retell |
 
 Backoffice drains active `email_sequence_steps` via `emails:tick`.
-`find_funnel_dropouts()` provides the base eligibility set, and Backoffice
-skips sends once `activation_paid_at` or `billing_customers.card_brand/card_last4`
-indicates the workspace reached the payment/card step.
+Migration `344_email-sequence-audience-mode.sql` adds `audience_mode` with
+`not_activated` as the default for existing and new rows. In this mode Backoffice
+targets every workspace old enough for the step while `activation_paid_at` is
+null and no `billing_customers.card_brand/card_last4` exists. The optional
+`funnel_stage` mode preserves `find_funnel_dropouts()` targeting. Both modes use
+`onboarding_reengagement_sends` for per-workspace/step idempotency and honor
+`email_suppressions` before delivery.
 
 ---
 
 ## Schema Contracts
 
-### organizations
+The canonical core tables use the singular names `organization` and `user`. The membership join
+table remains plural as `user_organizations`. Consumers must not substitute plural
+`organizations` or `users` endpoints: those relations do not exist in production.
+
+### organization
 
 ```sql
-CREATE TABLE organizations (
+CREATE TABLE organization (
   id text PRIMARY KEY,  -- Clerk org ID
   name text NOT NULL,
   created_at timestamptz DEFAULT now(),
@@ -231,7 +243,7 @@ CREATE TABLE organizations (
 ```sql
 CREATE TABLE campaigns (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  organization_id text NOT NULL REFERENCES organizations(id),
+  organization_id text NOT NULL REFERENCES organization(id),
   name text NOT NULL,
   status campaign_status DEFAULT 'draft',
   lead_source text CHECK (lead_source IN ('csv', 'template_csv', 'crm_list', 'manual', 'b2b_search', 'research')),
@@ -619,6 +631,24 @@ queued → importing/raw_import → processing/classification
 ---
 
 ## Backup & Recovery
+
+### Hetzner migration runner
+
+Self-hosted stage and production PostgreSQL migrations use the explicit operator runner in
+`operations/hetzner-migrations/`. Operators pass the exact ordered SQL paths from the checked-out
+branch; the runner never scans by numeric prefix because migration numbers collide between branches.
+
+```bash
+./operations/hetzner-migrations/migrate.sh status stage
+./operations/hetzner-migrations/migrate.sh plan stage migrations/release_1.3.0/344_email-sequence-audience-mode.sql
+./operations/hetzner-migrations/migrate.sh apply stage migrations/release_1.3.0/344_email-sequence-audience-mode.sql
+```
+
+Migration identity is full repository path plus SHA-256. Applies use `supabase_admin`, take and
+validate a full backup, lock per environment, transact each migration together with its private
+ledger entry, and notify PostgREST after success. Production additionally requires
+`--confirm-production` and refuses schema changes during active logical-replication/standby windows.
+See `operations/hetzner-migrations/README.md` for the production command and safety contract.
 
 ### Automated Backups
 

@@ -61,4 +61,4 @@ chmod 600 "$CUTOVER_MARKER"
 unset ANON_KEY SERVICE_ROLE_KEY
 
 echo "DATABASE CUTOVER COMPLETE"
-echo "Storage and MongoDB reverse standby are active. PostgreSQL is protected by weekly backup checkpoints, not live cloud apply."
+echo "Storage and MongoDB reverse standby are active. PostgreSQL is protected by thirty-minute backup checkpoints, not live cloud apply."
