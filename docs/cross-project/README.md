@@ -116,6 +116,13 @@ CRM workflow additions:
 
 `organization_files.file_category` values currently include `documents`, `transcripts`, `linkedin_voice`, `internal_documents`, `sales_papers`, `sait_guidelines`, `brand_guidelines`, `case_study`, and `sales_scripts`. New values must be added to the Supabase enum and kept aligned in `selltonai`, `selltonai-modal`, and `selltonai-vector-api`.
 
+`organization_files.processing_status` and `organization_files.error_detail` are
+owned exclusively by `selltonai-modal` after document analysis starts. A row may
+be marked `processed` only after the vector API confirms `success=true` and at
+least one chunk. The frontend treats both fields as read-only and may only ask
+Modal to retry analysis. `error_detail` is nullable, limited to 500 characters,
+and must contain a sanitized, non-secret failure summary.
+
 ### Billing Tables
 
 | Table | Primary Writer | Primary Readers | Purpose |
