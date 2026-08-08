@@ -107,6 +107,10 @@ CRM workflow additions:
 - Reconciliation applies a 13-day activity floor before nurture can scan the
   historical backlog and then chooses the highest-stage active company contact
   as the deal primary.
+- CRM flags may be enabled only after the organization-scoped reconciliation
+  readiness report has no missing/lagging deals, primary-contact mismatches,
+  duplicate open deals, or unresolved projection failures. The database guard
+  enforces this for both the operator RPC and direct settings writes.
 - Additive task enum values are `nurture_reminder`, `linkedin_connect`, and
   `manual_outreach`; Backoffice generic task aggregation remains compatible.
 
