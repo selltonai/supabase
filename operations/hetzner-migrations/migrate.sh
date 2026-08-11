@@ -149,7 +149,21 @@ tar -C "$bundle_directory" -czf "$archive_path" manifest.tsv files
 readonly remote_token="${TARGET_ENVIRONMENT}-${SHORT_COMMIT}-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 readonly remote_archive="/tmp/sellton-postgres-migrations-$remote_token.tar.gz"
 readonly remote_runner="/tmp/sellton-postgres-migrate-$remote_token.sh"
-readonly -a ssh_options=(-F /dev/null -i "$SSH_KEY" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$KNOWN_HOSTS")
+# Keepalives are load-bearing, not hygiene. `-F /dev/null` deliberately ignores
+# any user ssh_config, so without these the session inherits NO keepalive at all
+# — and the remote runner takes a full `pg_dump -Fc` of production before it
+# applies anything, which is minutes of silence on the channel. A production
+# apply failed exactly there:
+#
+#   [postgres-migrate-remote] Creating pre-migration backup: …
+#   client_loop: send disconnect: Broken pipe
+#   Error: Process completed with exit code 255
+#
+# Nothing was wrong with the SQL (the pending migration had not been reached);
+# 255 is ssh's own connection-failure code. ServerAliveInterval keeps the
+# channel alive through the dump; 60 × 30s tolerates a half-hour of silence
+# before giving up, which is far longer than any legitimate backup here.
+readonly -a ssh_options=(-F /dev/null -i "$SSH_KEY" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$KNOWN_HOSTS" -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -o TCPKeepAlive=yes)
 
 log "Uploading verified migration bundle: environment=$TARGET_ENVIRONMENT action=$ACTION files=${#migration_arguments[@]} commit=$SOURCE_COMMIT"
 scp "${ssh_options[@]}" "$archive_path" "$SSH_USER@$SSH_HOST:$remote_archive"
