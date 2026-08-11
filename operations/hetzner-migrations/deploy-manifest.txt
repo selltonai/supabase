@@ -16,3 +16,4 @@ migrations/release_1.3.0/356_organization-settings-company-name.sql
 migrations/release_1.3.0/357_email-batch-usage-ledger.sql
 migrations/release_1.3.0/358_add-organization-files-indexing-error-detail.sql
 migrations/release_1.3.0/359_dashboard-email-reply-events.sql
+migrations/release_1.3.0/361_notification-type-campaign-account-missing.sql
