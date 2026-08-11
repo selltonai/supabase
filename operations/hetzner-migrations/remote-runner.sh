@@ -62,6 +62,7 @@ readonly WORK_DIRECTORY="$(mktemp -d "${TMPDIR:-/tmp}/sellton-postgres-migrate-X
 readonly MANIFEST_PATH="$WORK_DIRECTORY/manifest.tsv"
 readonly FILES_DIRECTORY="$WORK_DIRECTORY/files"
 backup_path=""
+backup_temporary=""
 artifact_path=""
 
 cleanup() {
@@ -71,6 +72,18 @@ cleanup() {
   fi
   if [[ "$0" == /tmp/sellton-postgres-migrate-*.sh ]]; then
     rm -f "$0"
+  fi
+  # A run that dies DURING pg_dump (the ssh session dropping is the observed
+  # case) left its partial dump behind forever: the trap removed the archive and
+  # this script but never the in-progress backup, and the retention prune below
+  # only ever matches finished `.dump` files. Two failed production attempts on
+  # 2026-08-11 each stranded a partial dump the size of the database, on the
+  # same volume the next run's disk precheck depends on — so repeated failures
+  # walked the host toward the "Insufficient free disk" hard stop.
+  # Only ever removes the *.tmp this run created; a completed backup has already
+  # been renamed to $backup_path by then.
+  if [[ -n "$backup_temporary" && "$backup_temporary" == *.dump.tmp && -e "$backup_temporary" ]]; then
+    rm -f "$backup_temporary"
   fi
 }
 trap cleanup EXIT
