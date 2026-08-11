@@ -253,10 +253,28 @@ for index in "${!migration_paths[@]}"; do
   [[ -z "$recorded_hash" ]] || continue
 
   log "Applying $migration_path"
+  # Build the migration + its ledger INSERT as ONE complete file before psql
+  # sees any of it.
+  #
+  # This used to be a `{ cat …; printf …; } | psql --single-transaction` pipe,
+  # which is not crash-safe: `psql --single-transaction` COMMITS at end-of-input,
+  # and a clean EOF is indistinguishable from a truncated one. On 2026-08-11 the
+  # ssh session died mid-apply, the shell feeding that pipe was killed after
+  # `cat` had emitted the migration but before `printf` emitted the INSERT, psql
+  # saw EOF and committed — so migration 361 landed in production while the
+  # ledger recorded nothing. It was idempotent, so a re-run was harmless; a
+  # non-idempotent migration in that state would be a genuine hazard, and the
+  # ledger is exactly what is supposed to prevent double application.
+  #
+  # Writing the statement file first makes truncation impossible: either psql
+  # receives the whole unit (migration + ledger row, committed together) or the
+  # run dies before psql starts and nothing is applied at all.
+  apply_statements="$WORK_DIRECTORY/apply-$index.sql"
   {
     cat "$FILES_DIRECTORY/$migration_path"
     printf '\nINSERT INTO sellton_migrations.applied_migrations (migration_path, sha256, source_commit, environment, applied_by, backup_path, artifact_path) VALUES ('"'"'%s'"'"', '"'"'%s'"'"', '"'"'%s'"'"', '"'"'%s'"'"', '"'"'%s'"'"', '"'"'%s'"'"', '"'"'%s'"'"');\n' "$migration_path" "$expected_hash" "$SOURCE_COMMIT" "$TARGET_ENVIRONMENT" "$MIGRATION_ACTOR" "$backup_path" "$artifact_path"
-  } | psql_query --single-transaction
+  } > "$apply_statements"
+  psql_query --single-transaction < "$apply_statements"
 done
 
 printf "NOTIFY pgrst, 'reload schema';\n" | psql_query >/dev/null
