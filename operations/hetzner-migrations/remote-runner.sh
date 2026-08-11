@@ -62,6 +62,7 @@ readonly WORK_DIRECTORY="$(mktemp -d "${TMPDIR:-/tmp}/sellton-postgres-migrate-X
 readonly MANIFEST_PATH="$WORK_DIRECTORY/manifest.tsv"
 readonly FILES_DIRECTORY="$WORK_DIRECTORY/files"
 backup_path=""
+backup_temporary=""
 artifact_path=""
 
 cleanup() {
@@ -71,6 +72,18 @@ cleanup() {
   fi
   if [[ "$0" == /tmp/sellton-postgres-migrate-*.sh ]]; then
     rm -f "$0"
+  fi
+  # A run that dies DURING pg_dump (the ssh session dropping is the observed
+  # case) left its partial dump behind forever: the trap removed the archive and
+  # this script but never the in-progress backup, and the retention prune below
+  # only ever matches finished `.dump` files. Two failed production attempts on
+  # 2026-08-11 each stranded a partial dump the size of the database, on the
+  # same volume the next run's disk precheck depends on — so repeated failures
+  # walked the host toward the "Insufficient free disk" hard stop.
+  # Only ever removes the *.tmp this run created; a completed backup has already
+  # been renamed to $backup_path by then.
+  if [[ -n "$backup_temporary" && "$backup_temporary" == *.dump.tmp && -e "$backup_temporary" ]]; then
+    rm -f "$backup_temporary"
   fi
 }
 trap cleanup EXIT
@@ -240,10 +253,28 @@ for index in "${!migration_paths[@]}"; do
   [[ -z "$recorded_hash" ]] || continue
 
   log "Applying $migration_path"
+  # Build the migration + its ledger INSERT as ONE complete file before psql
+  # sees any of it.
+  #
+  # This used to be a `{ cat …; printf …; } | psql --single-transaction` pipe,
+  # which is not crash-safe: `psql --single-transaction` COMMITS at end-of-input,
+  # and a clean EOF is indistinguishable from a truncated one. On 2026-08-11 the
+  # ssh session died mid-apply, the shell feeding that pipe was killed after
+  # `cat` had emitted the migration but before `printf` emitted the INSERT, psql
+  # saw EOF and committed — so migration 361 landed in production while the
+  # ledger recorded nothing. It was idempotent, so a re-run was harmless; a
+  # non-idempotent migration in that state would be a genuine hazard, and the
+  # ledger is exactly what is supposed to prevent double application.
+  #
+  # Writing the statement file first makes truncation impossible: either psql
+  # receives the whole unit (migration + ledger row, committed together) or the
+  # run dies before psql starts and nothing is applied at all.
+  apply_statements="$WORK_DIRECTORY/apply-$index.sql"
   {
     cat "$FILES_DIRECTORY/$migration_path"
     printf '\nINSERT INTO sellton_migrations.applied_migrations (migration_path, sha256, source_commit, environment, applied_by, backup_path, artifact_path) VALUES ('"'"'%s'"'"', '"'"'%s'"'"', '"'"'%s'"'"', '"'"'%s'"'"', '"'"'%s'"'"', '"'"'%s'"'"', '"'"'%s'"'"');\n' "$migration_path" "$expected_hash" "$SOURCE_COMMIT" "$TARGET_ENVIRONMENT" "$MIGRATION_ACTOR" "$backup_path" "$artifact_path"
-  } | psql_query --single-transaction
+  } > "$apply_statements"
+  psql_query --single-transaction < "$apply_statements"
 done
 
 printf "NOTIFY pgrst, 'reload schema';\n" | psql_query >/dev/null
