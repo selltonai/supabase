@@ -19,3 +19,4 @@ migrations/release_1.3.0/359_dashboard-email-reply-events.sql
 migrations/release_1.3.0/361_notification-type-campaign-account-missing.sql
 migrations/release_1.3.0/362_backfill-contact-linkedin-provider-id.sql
 migrations/release_1.3.0/363_cleanup-cancelled-campaign-sequence-actions.sql
+migrations/release_1.3.0/364_sequence-action-deferral-telemetry.sql
