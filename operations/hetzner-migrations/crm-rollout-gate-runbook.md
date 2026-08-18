@@ -16,20 +16,30 @@ gate before the app can explain it reproduces the blank-500 experience.
 
 ## Enabling an organization (service role, in order)
 
+⚠️ The second argument is `p_apply`, and it defaults to FALSE. **`false` is the
+dry run; `true` writes.** An earlier version of this runbook had those two
+inverted — read the argument, not the step number.
+
 ```sql
 -- 1. Is this org ready? Read-only, safe to run any time.
 select public.crm_deal_reconciliation_readiness('<organization_id>');
 
--- 2. Dry run the reconciliation and read what it WOULD change.
-select public.reconcile_crm_deals_for_rollout('<organization_id>', true);
-
--- 3. Apply it for real.
+-- 2. Dry run — p_apply = false. Reports `before` and `apply_required`,
+--    changes nothing.
 select public.reconcile_crm_deals_for_rollout('<organization_id>', false);
+
+-- 3. Apply — p_apply = true. Creates the missing deals and resolves stale
+--    projection-failure rows. REFUSES with 23514 if either CRM flag is already
+--    enabled: reconciliation runs with the flags OFF, by design.
+select public.reconcile_crm_deals_for_rollout('<organization_id>', true);
 
 -- 4. Enable. Second argument also switches CRM automation on; leave it false
 --    to enable only the pipeline flag.
 select public.enable_crm_pipeline_after_reconciliation('<organization_id>', true);
 ```
+
+Step 3 returns `before` and `after` readiness in one payload, so the row it
+prints is the verification — no separate re-check needed before step 4.
 
 Step 4 re-checks readiness and refuses with `23514` plus the readiness JSON in
 DETAIL if anything regressed between steps 3 and 4, so it is safe to re-run.
