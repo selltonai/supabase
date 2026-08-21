@@ -283,6 +283,7 @@ columns on the canonical `user` identity table.
 | `lastname` | text | | Last name | ✅ |
 | `email` | text | | Email address (unique per org) | ✅ |
 | `linkedin_url` | text | | LinkedIn profile URL | ✅ |
+| `linkedin_provider_id` | text | Nullable | LinkedIn member URN used for organization-scoped counterpart resolution | ✅ |
 | `headline` | text | | LinkedIn headline/title | ✅ |
 | `summary` | text | | LinkedIn summary | ✅ |
 | `phone` | text | | Phone number | ✅ |
@@ -323,6 +324,7 @@ columns on the canonical `user` identity table.
 - `idx_contacts_email` ON `contacts(email)`
 - `idx_contacts_pipeline_stage` ON `contacts(pipeline_stage)`
 - `idx_contacts_org_email` ON `contacts(organization_id, email)`
+- `idx_contacts_org_linkedin_provider_id` ON `contacts(organization_id, linkedin_provider_id)` WHERE `linkedin_provider_id IS NOT NULL`
 
 ---
 

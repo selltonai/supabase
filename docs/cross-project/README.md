@@ -303,6 +303,7 @@ CREATE TABLE contacts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id text NOT NULL REFERENCES organizations(id),
   email text,
+  linkedin_provider_id text,
   pipeline_stage text DEFAULT 'prospect',
   processing_status text DEFAULT 'pending',
   last_reply_sentiment text,
@@ -318,6 +319,13 @@ CREATE TABLE contacts (
 **Read by**: selltonai (display), backoffice (oversight)
 **Unique**: `(organization_id, email)` - one contact per email per org
 **Cleanup status**: `phantom_pending_rediscovery` marks legacy placeholder contacts. These rows are preserved, but selltonai-modal treats them as non-real contacts for AI-Ark enrollment recovery.
+
+`contacts.linkedin_provider_id` is the nullable LinkedIn member URN used by
+`selltonai` to resolve inbound messages and relationship events to an existing
+contact. The database owns the column and the partial
+`(organization_id, linkedin_provider_id)` lookup index. Application writers fill
+only missing values; the ordered stage manifest creates this contract before the
+one-time thread backfill.
 
 ---
 
