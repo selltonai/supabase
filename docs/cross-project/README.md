@@ -144,6 +144,17 @@ and must contain a sanitized, non-secret failure summary.
 
 `billing_customers.auto_charge_enabled=false` marks a workspace as non-billable in Stripe. `selltonai-modal` must skip scheduled invoices, bill-now, and manual invoice payment while the flag is false. Usage rows remain unstamped/uninvoiced so monthly spend-limit enforcement can still block work when the configured limit is reached.
 
+`billing_customers.billing_started_at` is the immutable first-card boundary. A NULL value means
+billing has not started: usage, infrastructure fees, seat fees, bill-now, and scheduled invoices
+must all remain zero/skipped. Billing views include only `usage.created_at >= billing_started_at`.
+Existing cardholders are backfilled during migration; later payment-method replacements never move
+the boundary.
+
+Organization lifecycle fields `organization.archived_at` and `archived_by` complement the existing
+soft-delete flag. The service-role-only `set_organization_lifecycle_state(text, text, text)` RPC is
+the canonical archive/delete transition and atomically suspends dispatch and disables auto-charge.
+Consumers must treat either `deleted=true` or non-NULL `archived_at` as inactive.
+
 ### Usage Analytics projection
 
 Migration `345_usage-analytics-projection.sql` adds the internal, trigger-maintained `usage_analytics_projection_*` relations and `analytics_usage_rollup_v3(...)`. `selltonai` is the only interactive reader, through its authenticated `/api/analytics/usage-rollup` BFF route; `selltonai-modal` continues to write `public.usage` unchanged. The projection must be historically backfilled in bounded batches and marked complete before deploying the v3 route. The v3 function does not serve partial data or fall back to raw-row scans when that marker is absent.
