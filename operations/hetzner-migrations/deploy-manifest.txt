@@ -26,4 +26,3 @@ migrations/release_1.3.0/366_contact-automation-holds.sql
 migrations/release_1.3.0/367_crm-deal-notes-and-stage-reasons.sql
 migrations/release_1.3.0/368_sequence-stopped-deal-activity.sql
 migrations/release_1.3.0/369_deal-activity-type-check-extension.sql
-migrations/release_1.3.0/370_stage-enable-nurture-all-orgs.sql
