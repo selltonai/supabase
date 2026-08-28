@@ -22,3 +22,7 @@ migrations/release_1.3.0/362_backfill-contact-linkedin-provider-id.sql
 migrations/release_1.3.0/363_cleanup-cancelled-campaign-sequence-actions.sql
 migrations/release_1.3.0/364_sequence-action-deferral-telemetry.sql
 migrations/release_1.3.0/360_crm-deals-reconciliation-rollout-gate.sql
+migrations/release_1.3.0/366_contact-automation-holds.sql
+migrations/release_1.3.0/367_crm-deal-notes-and-stage-reasons.sql
+migrations/release_1.3.0/368_sequence-stopped-deal-activity.sql
+migrations/release_1.3.0/369_deal-activity-type-check-extension.sql

@@ -296,7 +296,9 @@ columns on the canonical `user` identity table.
 | `pipeline_stage` | pipeline_stage | DEFAULT 'prospect' | Contact pipeline stage | ✅ |
 | `ooo_until` | timestamptz | | Out-of-office until date | ✅ |
 | `unsubscribed_at` | timestamptz | | Unsubscribe timestamp | ✅ |
-| `stop_drafts` | boolean | DEFAULT false | Stop generating draft emails | ✅ |
+| `stop_drafts` | boolean | DEFAULT false | Outbound sequence/sender boundary; not by itself a CRM automation hold | ✅ |
+| `automation_hold_at` | timestamptz | Nullable | Explicit hard hold for NBA, nurture, and reply drafting | ✅ |
+| `automation_hold_reason` | text | Nullable | Stable machine-readable hard-hold reason | ✅ |
 | `last_email_sentiment` | text | | Last email sentiment analysis | ✅ |
 | `last_email_intent` | text | | Last email intent classification | ✅ |
 | `last_thread_id` | text | | Last Gmail thread ID | ✅ |

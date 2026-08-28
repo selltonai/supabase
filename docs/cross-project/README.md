@@ -309,6 +309,8 @@ CREATE TABLE contacts (
   last_reply_sentiment text,
   last_reply_sub_intent text,
   last_reply_at timestamptz,
+  automation_hold_at timestamptz,
+  automation_hold_reason text,
   -- ... enrichment fields (JSONB)
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
@@ -326,6 +328,21 @@ contact. The database owns the column and the partial
 `(organization_id, linkedin_provider_id)` lookup index. Application writers fill
 only missing values; the ordered stage manifest creates this contract before the
 one-time thread backfill.
+
+`contacts.stop_drafts` remains the outbound sequence/sender boundary and is
+still honored by campaign send and claim loops. `contacts.automation_hold_at`
+is the distinct hard-stop contract read by CRM next-best-action, deal nurture,
+and LinkedIn reply drafting; unsubscribe and do-not-contact remain independent
+canonical suppression markers. The Stage BFF writes the hold for negative
+manual LinkedIn takeovers and DNC changes, while selltonai-modal writes it for
+email unsubscribe requests.
+
+Deal-card notes are written atomically to `contact_notes` (the canonical copy
+and decision-context store) and to a linked `deal_activities` audit row through
+the service-role-only `add_crm_deal_note` RPC. Manual stage mutations may pass
+an optional reason through the five-argument `update_crm_deal` overload; the
+reason is stored on `stage_change.metadata.reason` and the legacy four-argument
+RPC remains supported.
 
 ---
 
