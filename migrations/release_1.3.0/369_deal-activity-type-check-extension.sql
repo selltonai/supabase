@@ -48,7 +48,7 @@ BEGIN
   VALUES (v_deal_id,p_organization_id,p_activity_type,p_actor,
     CASE WHEN p_actor='user' THEN p_actor_user_id ELSE NULL END,p_contact_id,
     COALESCE(NULLIF(BTRIM(p_title),''),'Deal activity'),COALESCE(p_metadata,'{}'::JSONB),
-    p_activity_type NOT IN ('sequence_stopped','decision','signal'),BTRIM(p_source_event_key),COALESCE(p_occurred_at,NOW()))
+    p_activity_type NOT IN ('sequence_stopped','decision'),BTRIM(p_source_event_key),COALESCE(p_occurred_at,NOW()))
   ON CONFLICT (organization_id,source_event_key) WHERE source_event_key IS NOT NULL DO NOTHING
   RETURNING id INTO v_activity_id;
   IF v_activity_id IS NULL THEN
