@@ -63,6 +63,12 @@ jobs:
           git checkout -B "$GITHUB_REF_NAME" "$GITHUB_SHA"
           [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
 
+      - name: Verify migration manifest completeness
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./operations/hetzner-migrations/verify-deploy-manifest.sh
+
       - name: Configure SSH
         shell: bash
         env:
