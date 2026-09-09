@@ -1,24 +1,5 @@
--- KAN-282: allow all CRM activity types emitted by the Stage automation spine.
--- Depends on 355 and 368. Additive constraint replacement; no existing rows are changed.
-ALTER TABLE public.deal_activities
-  ADD CONSTRAINT deal_activities_type_check_v3_next CHECK (
-    activity_type IN (
-      'deal_created', 'stage_change', 'amount_change', 'owner_change',
-      'nurture_change', 'snooze_change', 'note', 'email_in', 'email_out',
-      'linkedin_in', 'linkedin_out', 'task_created', 'task_completed',
-      'sequence_stopped', 'linkedin_connected', 'decision', 'signal'
-    )
-  ) NOT VALID;
-
-ALTER TABLE public.deal_activities
-  VALIDATE CONSTRAINT deal_activities_type_check_v3_next;
-
-ALTER TABLE public.deal_activities
-  DROP CONSTRAINT IF EXISTS deal_activities_type_check;
-
-ALTER TABLE public.deal_activities
-  RENAME CONSTRAINT deal_activities_type_check_v3_next TO deal_activities_type_check;
-
+-- KAN-282: restore the validation guarantees that migration 369 accidentally
+-- replaced when it extended the set of allowed activity types.
 CREATE OR REPLACE FUNCTION public.record_crm_deal_activity_for_contact(
   p_organization_id TEXT, p_contact_id UUID, p_activity_type TEXT, p_title TEXT,
   p_source_event_key TEXT, p_metadata JSONB DEFAULT '{}'::JSONB,
@@ -31,6 +12,12 @@ BEGIN
   IF p_activity_type NOT IN ('email_in','email_out','linkedin_in','linkedin_out',
     'sequence_stopped','linkedin_connected','decision','signal') THEN
     RAISE EXCEPTION 'Unsupported projected activity type: %', p_activity_type USING ERRCODE = '22023';
+  END IF;
+  IF p_actor NOT IN ('system','user') THEN
+    RAISE EXCEPTION 'Unsupported activity actor: %', p_actor USING ERRCODE = '22023';
+  END IF;
+  IF NULLIF(BTRIM(p_source_event_key), '') IS NULL THEN
+    RAISE EXCEPTION 'A stable source event key is required' USING ERRCODE = '22023';
   END IF;
   SELECT d.id INTO v_deal_id FROM public.deals d
   JOIN public.company_contacts cc ON cc.company_id=d.company_id AND cc.organization_id=d.organization_id
@@ -48,6 +35,16 @@ BEGIN
   IF v_activity_id IS NULL THEN
     SELECT id INTO v_activity_id FROM public.deal_activities
     WHERE organization_id=p_organization_id AND source_event_key=BTRIM(p_source_event_key);
+    IF NOT EXISTS (SELECT 1 FROM public.deal_activities da
+      WHERE da.id=v_activity_id AND da.deal_id=v_deal_id
+      AND da.contact_id=p_contact_id AND da.activity_type=p_activity_type) THEN
+      RAISE EXCEPTION 'Source event key already belongs to a different CRM activity envelope' USING ERRCODE = '23505';
+    END IF;
   END IF;
   RETURN v_activity_id;
 END; $$;
+
+REVOKE ALL ON FUNCTION public.record_crm_deal_activity_for_contact(TEXT, UUID, TEXT, TEXT, TEXT, JSONB, TIMESTAMPTZ, TEXT, TEXT)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.record_crm_deal_activity_for_contact(TEXT, UUID, TEXT, TEXT, TEXT, JSONB, TIMESTAMPTZ, TEXT, TEXT)
+  TO service_role;

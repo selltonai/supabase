@@ -113,6 +113,13 @@ CRM workflow additions:
   enforces this for both the operator RPC and direct settings writes.
 - Additive task enum values are `nurture_reminder`, `linkedin_connect`, and
   `manual_outreach`; Backoffice generic task aggregation remains compatible.
+- Migration `370_deal-delete-and-brief-metadata.sql` adds
+  `companies.sales_brief_generated_at`, replaces
+  `finish_crm_manual_outreach_copy(...)` with the additive
+  `p_reasoning_note` argument, and adds service-role-only
+  `delete_crm_deal(organization, deal, actor)`. Deal deletion first cancels
+  open deal-workflow tasks, records `cancelled_reason = 'deal_deleted'`, and
+  then hard-deletes the deal. Browser roles cannot execute either RPC.
 
 ### Document & Email Tables
 
