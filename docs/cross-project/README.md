@@ -120,6 +120,13 @@ CRM workflow additions:
   `delete_crm_deal(organization, deal, actor)`. Deal deletion first cancels
   open deal-workflow tasks, records `cancelled_reason = 'deal_deleted'`, and
   then hard-deletes the deal. Browser roles cannot execute either RPC.
+- Migration `next-release/372_crm-company-delete-deal-cleanup.sql` runs that
+  same deal cleanup before a company is deleted. This cancels open deal-workflow
+  tasks and clears their deal references before the company foreign key clears
+  company references. It prevents task-scope validation from seeing a deleted
+  deal during a company cascade (KAN-304). Completed task history and normal
+  organization/company/contact validation remain intact. Modal list deletion
+  and frontend company deletion require no request/response changes.
 
 ### Document & Email Tables
 
