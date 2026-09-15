@@ -557,6 +557,15 @@ CREATE INDEX idx_table_name_pending ON table_name(organization_id, status)
 
 ## JSONB Field Contracts
 
+### contacts.professional_summary (KAN-305 A4)
+
+Additive migration `migrations/next-release/373_contacts-professional-summary.sql`
+must precede deployment of the Modal AI Ark mapper. It defaults to `{}` and holds
+department, seniority, function, tenure months, `source: "ai_ark"`, `fetched_at`,
+and provider snapshot `as_of`. Modal produces it; LinkedIn context consumes its
+bounded professional fields. Keep it separate from LLM `analysis` and Unipile's
+`linkedin_profile`. Existing API shapes, contact columns, and RLS are unchanged.
+
 ### companies.b2b_result
 
 ```typescript
