@@ -30,3 +30,4 @@ migrations/release_1.3.0/370_deal-delete-and-brief-metadata.sql
 migrations/release_1.3.0/371_restore-deal-activity-rpc-guards.sql
 migrations/next-release/372_crm-company-delete-deal-cleanup.sql
 migrations/next-release/373_contacts-professional-summary.sql
+migrations/next-release/374_ai-ark-company-provenance.sql
