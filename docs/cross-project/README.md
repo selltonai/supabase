@@ -765,3 +765,44 @@ supabase migration down
 **Last Updated**: May 20, 2026
 **Maintained By**: Database team, update on schema changes  
 **Purpose**: Shared database contracts for all services
+
+
+### CRM call tasks (KAN-305)
+
+Apply `375_crm-call-task-type.sql` in its own committed transaction before
+`376_crm-call-task-workflows.sql`. `task_type=call` is human work with
+`metadata.channel=phone`; it must never enter approve/send dispatch.
+
+Modal calls service-role-only `create_crm_call_task(organization_id, deal_id,
+contact_id, actor_user_id, due_date, note, pitch, metadata, source)` using the
+`p_`-prefixed named RPC parameters. It returns the task JSON. Source defaults to
+`manual`; `reply` and `deal` are automatic sources. The RPC atomically writes the
+canonical contact note, its deal activity, and the task; assignee/company/campaign
+come from the locked deal. Metadata channel/source/note_id/note_to_ai/pitch/phone
+are canonical overrides. Empty notes, >5000-character notes, empty/>60-word
+pitches, missing phone, hard contact suppressions, closed deals, unrelated contacts,
+and invalid actor/owner organization membership fail the transaction. One open
+call per deal is enforced both under the deal lock and by a partial unique index.
+`stop_drafts` alone retains its sequence-boundary meaning and does not imply a hold.
+
+The authenticated Next.js BFF and Modal ingress enforce owner-or-manager access
+before invoking these service-role RPCs; database membership checks do not grant
+manager privileges. SQLSTATE23505 means an existing open call,23514 means a
+scope/safety/lifecycle violation,22023 means invalid input andP0002 means not found.
+
+Next.js uses `snooze_crm_call_task(p_organization_id,p_task_id,p_actor_user_id)` to
+move a pending task to `max(now,due_date)+1day`. Completion remains the existing
+owner-authorized Tasks update. Calls allow pending/completed/cancelled/rejected;
+terminal calls cannot reopen or change into sendable task types. Existing generic
+deal owner sync and task activity auditing apply unchanged. Deal close/delete
+cancel pending calls, and FK contact/deal deletion retains cancelled history.
+
+`call_due` extends the existing notifications CHECK without removing any installed
+types. `notify_call_tasks` is an application-managed user_profiles notification
+preferences JSONB key; no dedicated database column or backfill is required.
+
+Run `bash tests/run-crm-call-contract.sh` for disposable PostgreSQL15 tests,
+including repeat migration application, tenant boundaries, suppression, atomicity,
+deduplication, ownership, snooze/completion/close/delete and dispatch prevention.
+The bootstrap deliberately models the touched schema and loads the real existing
+352 workflow functions; it is not a full deployed-schema replay.

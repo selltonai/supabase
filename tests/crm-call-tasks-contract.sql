@@ -6,7 +6,7 @@ INSERT INTO public.contacts(id,organization_id,name,phone,stop_drafts) VALUES ('
 INSERT INTO public.deals(id,organization_id,company_id,primary_contact_id,owner_user_id,stage) VALUES ('30000000-0000-0000-0000-000000000001','org-a','10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','owner','LEAD');
 INSERT INTO public.company_contacts VALUES ('org-a','10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001');
 DO $$
-DECLARE v_task jsonb; v_id uuid; v_count integer; v_due timestamptz;
+DECLARE v_task jsonb; v_id uuid; v_count integer; v_due timestamptz; v_field text;
 BEGIN
   IF has_function_privilege('authenticated','public.create_crm_call_task(text,uuid,uuid,text,timestamptz,text,text,jsonb,text)','EXECUTE') OR NOT has_function_privilege('service_role','public.create_crm_call_task(text,uuid,uuid,text,timestamptz,text,text,jsonb,text)','EXECUTE') THEN RAISE EXCEPTION 'RPC privilege contract broken'; END IF;
   BEGIN
@@ -28,6 +28,15 @@ BEGIN
     RAISE EXCEPTION 'Held contact accepted';
   EXCEPTION WHEN check_violation THEN NULL; END;
   UPDATE public.contacts SET automation_hold_at=NULL;
+  FOREACH v_field IN ARRAY ARRAY['do_not_contact','open_to_work','unsubscribed_at'] LOOP
+    EXECUTE format('UPDATE public.contacts SET %I = %s',v_field,CASE WHEN v_field='unsubscribed_at' THEN 'now()' ELSE 'true' END);
+    BEGIN
+      PERFORM public.create_crm_call_task('org-a','30000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','owner',now(),'Asked for pricing','Discuss requested pricing.', '{}');
+      RAISE EXCEPTION 'Suppressed contact accepted: %',v_field;
+    EXCEPTION WHEN check_violation THEN NULL; END;
+    EXECUTE format('UPDATE public.contacts SET %I = NULL',v_field);
+  END LOOP;
+  IF EXISTS(SELECT 1 FROM contact_notes) OR EXISTS(SELECT 1 FROM tasks) THEN RAISE EXCEPTION 'Rejected creation left partial rows'; END IF;
   BEGIN
     PERFORM public.create_crm_call_task('org-a','30000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','owner',now(),'Asked for pricing',repeat('word ',61), '{}');
     RAISE EXCEPTION 'Overlong pitch accepted';
@@ -49,6 +58,14 @@ BEGIN
     UPDATE public.tasks SET send_status='sending' WHERE id=v_id;
     RAISE EXCEPTION 'Call sent through sender';
   EXCEPTION WHEN check_violation THEN NULL; END;
+  BEGIN
+    UPDATE public.tasks SET task_type='manual_outreach' WHERE id=v_id;
+    RAISE EXCEPTION 'Call converted into sender task';
+  EXCEPTION WHEN check_violation THEN NULL; END;
+  BEGIN
+    PERFORM public.snooze_crm_call_task('org-a',v_id,'outsider');
+    RAISE EXCEPTION 'Cross tenant actor snoozed call';
+  EXCEPTION WHEN check_violation THEN NULL; END;
   SELECT due_date INTO v_due FROM tasks WHERE id=v_id;
   v_task := public.snooze_crm_call_task('org-a',v_id,'manager');
   IF (v_task->>'due_date')::timestamptz <> v_due + interval '1 day' THEN RAISE EXCEPTION 'Snooze duration incorrect'; END IF;
@@ -68,6 +85,10 @@ BEGIN
     PERFORM public.snooze_crm_call_task('org-a',v_id,'replacement');
     RAISE EXCEPTION 'Cancelled call snoozed';
   EXCEPTION WHEN check_violation THEN NULL; END;
+  PERFORM public.delete_crm_deal('org-a','30000000-0000-0000-0000-000000000001','replacement');
+  IF (SELECT deal_id FROM tasks WHERE id=v_id) IS NOT NULL THEN RAISE EXCEPTION 'Delete did not detach cancelled call'; END IF;
+  DELETE FROM contacts WHERE id='20000000-0000-0000-0000-000000000001';
+  IF EXISTS(SELECT 1 FROM tasks WHERE contact_id IS NOT NULL) THEN RAISE EXCEPTION 'Contact deletion blocked'; END IF;
 END $$;
 INSERT INTO notifications(type) VALUES('call_due'),('task_assigned'),('linkedin_campaign_account_missing');
 ROLLBACK;
