@@ -806,3 +806,13 @@ including repeat migration application, tenant boundaries, suppression, atomicit
 deduplication, ownership, snooze/completion/close/delete and dispatch prevention.
 The bootstrap deliberately models the touched schema and loads the real existing
 352 workflow functions; it is not a full deployed-schema replay.
+
+Automatic sources additionally require `metadata.trigger.signal_id` and an explicit
+`metadata.trigger.inbound_id` (JSON null when there was no inbound). Creation
+rechecks organization `crm_automation_enabled`, latest inbound activity identity
+(ordered by created_at then id descending), and reply/deal signal identity after
+pitch generation. Deal signal IDs are stage_updated_at timestamps; reply signal IDs
+are inbound deal_activity UUIDs. A second unique index includes terminal tasks so
+an automatic signal cannot recreate a call after completion. Manual calls remain
+repeatable after completion. Reason-only hard holds and future ooo_until values
+are also rechecked before persistence.

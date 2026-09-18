@@ -73,7 +73,7 @@ BEGIN
   IF (SELECT assigned_to_user_id FROM tasks WHERE id=v_id)<>'replacement' THEN RAISE EXCEPTION 'Owner transfer missed call'; END IF;
   UPDATE public.tasks SET status='completed', completed_at=now(), completed_by_user_id='replacement' WHERE id=v_id;
   IF NOT EXISTS(SELECT 1 FROM deal_activities WHERE activity_type='task_completed' AND metadata->>'task_id'=v_id::text) THEN RAISE EXCEPTION 'Completion audit missing'; END IF;
-  v_task := public.create_crm_call_task('org-a','30000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','replacement',now(),'Second requested call','Follow up on requested pricing.', '{}','deal');
+  v_task := public.create_crm_call_task('org-a','30000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','replacement',now(),'Second requested call','Follow up on requested pricing.', '{}','manual');
   v_id := (v_task->>'id')::uuid;
   UPDATE public.deals SET stage='WON',closed_at=now();
   IF (SELECT status FROM tasks WHERE id=v_id)<>'cancelled' THEN RAISE EXCEPTION 'Close did not cancel call'; END IF;
@@ -91,4 +91,48 @@ BEGIN
   IF EXISTS(SELECT 1 FROM tasks WHERE contact_id IS NOT NULL) THEN RAISE EXCEPTION 'Contact deletion blocked'; END IF;
 END $$;
 INSERT INTO notifications(type) VALUES('call_due'),('task_assigned'),('linkedin_campaign_account_missing');
+ROLLBACK;
+
+-- Automatic idempotency and pitch-time eligibility races.
+BEGIN;
+INSERT INTO public."user" VALUES ('owner'),('manager'),('outsider'),('replacement');
+INSERT INTO public.user_organizations VALUES ('owner','org-a'),('manager','org-a'),('replacement','org-a'),('outsider','org-b');
+INSERT INTO public.contacts(id,organization_id,name,phone,stop_drafts) VALUES ('20000000-0000-0000-0000-000000000001','org-a','Test Contact','+44 7000 123456',true);
+INSERT INTO public.deals(id,organization_id,company_id,primary_contact_id,owner_user_id,stage) VALUES ('30000000-0000-0000-0000-000000000001','org-a','10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','owner','LEAD');
+INSERT INTO public.company_contacts VALUES ('org-a','10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001');
+INSERT INTO public.organization_settings VALUES('org-a',false);
+INSERT INTO public.deal_activities(id,organization_id,deal_id,contact_id,activity_type,created_at)
+VALUES('40000000-0000-0000-0000-000000000001','org-a','30000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','email_in',now()-interval '3 days');
+DO $$
+DECLARE v_task jsonb; v_metadata jsonb := '{"trigger":{"signal_id":"40000000-0000-0000-0000-000000000001","inbound_id":"40000000-0000-0000-0000-000000000001"}}';
+BEGIN
+  BEGIN
+    PERFORM create_crm_call_task('org-a','30000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','owner',now(),'Positive reply','Follow up on your request.',v_metadata,'reply');
+    RAISE EXCEPTION 'Disabled automation created call';
+  EXCEPTION WHEN check_violation THEN NULL; END;
+  UPDATE organization_settings SET crm_automation_enabled=true;
+  v_task := create_crm_call_task('org-a','30000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','owner',now(),'Positive reply','Follow up on your request.',v_metadata,'reply');
+  UPDATE tasks SET status='completed',completed_by_user_id='owner',completed_at=now() WHERE id=(v_task->>'id')::uuid;
+  BEGIN
+    PERFORM create_crm_call_task('org-a','30000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','owner',now(),'Positive reply','Follow up on your request.',v_metadata,'reply');
+    RAISE EXCEPTION 'Completed signal recreated a call';
+  EXCEPTION WHEN unique_violation THEN NULL; END;
+  IF (SELECT count(*) FROM contact_notes)<>1 THEN RAISE EXCEPTION 'Repeated signal leaked note'; END IF;
+  INSERT INTO deal_activities(id,organization_id,deal_id,contact_id,activity_type,created_at,metadata)
+  VALUES('40000000-0000-0000-0000-000000000002','org-a','30000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','linkedin_in',now(),'{"flagged":true}');
+  BEGIN
+    PERFORM create_crm_call_task('org-a','30000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','owner',now(),'Positive reply','Follow up on your request.',v_metadata,'reply');
+    RAISE EXCEPTION 'Newer inbound did not invalidate snapshot';
+  EXCEPTION WHEN check_violation THEN NULL; END;
+  DELETE FROM deal_activities WHERE activity_type IN ('email_in','linkedin_in');
+  UPDATE deals SET stage='MEETING_REQUESTED',stage_updated_at=now()-interval '4 days';
+  SELECT jsonb_build_object('trigger',jsonb_build_object('signal_id',stage_updated_at,'inbound_id',null)) INTO v_metadata FROM deals;
+  v_task := create_crm_call_task('org-a','30000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','owner',now(),'Meeting follow up','Follow up on the meeting request.',v_metadata,'deal');
+  UPDATE tasks SET status='completed',completed_by_user_id='owner',completed_at=now() WHERE id=(v_task->>'id')::uuid;
+  UPDATE deals SET stage_updated_at=now();
+  BEGIN
+    PERFORM create_crm_call_task('org-a','30000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','owner',now(),'Meeting follow up','Follow up on the meeting request.',v_metadata,'deal');
+    RAISE EXCEPTION 'Changed deal stage did not invalidate snapshot';
+  EXCEPTION WHEN check_violation THEN NULL; END;
+END $$;
 ROLLBACK;

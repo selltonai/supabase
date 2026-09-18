@@ -23,6 +23,11 @@ ON public.tasks(deal_id)
 WHERE deal_id IS NOT NULL AND task_type='call'::public.task_type
   AND status IN ('pending'::public.task_status,'in_progress'::public.task_status,'scheduled'::public.task_status,'in_review'::public.task_status);
 
+-- A processed automatic signal must not recreate a call after completion.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_call_automatic_signal
+ON public.tasks(organization_id,deal_id,(metadata->>'source'),(metadata->'trigger'->>'signal_id'))
+WHERE task_type='call'::public.task_type AND metadata->>'source' IN ('reply','deal');
+
 CREATE OR REPLACE FUNCTION public.validate_crm_call_task()
 RETURNS trigger LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
 DECLARE v_deal public.deals; v_contact public.contacts;
@@ -120,7 +125,7 @@ $$;
 
 CREATE OR REPLACE FUNCTION public.create_crm_call_task(p_organization_id text,p_deal_id uuid,p_contact_id uuid,p_actor_user_id text,p_due_date timestamptz,p_note text,p_pitch text,p_metadata jsonb,p_source text DEFAULT 'manual')
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE v_deal public.deals; v_contact public.contacts; v_note_id uuid; v_task public.tasks;
+DECLARE v_deal public.deals; v_contact public.contacts; v_note_id uuid; v_task public.tasks; v_inbound_id uuid;
 BEGIN
   IF NULLIF(btrim(p_note),'') IS NULL OR length(btrim(p_note))>5000
     OR NULLIF(btrim(p_pitch),'') IS NULL OR cardinality(regexp_split_to_array(btrim(p_pitch), E'\\s+'))>60
@@ -141,6 +146,28 @@ BEGIN
   END IF;
   IF EXISTS(SELECT 1 FROM public.tasks WHERE deal_id=p_deal_id AND task_type='call' AND status IN ('pending','in_progress','scheduled','in_review')) THEN
     RAISE EXCEPTION 'An open call already exists for this deal' USING ERRCODE='23505';
+  END IF;
+  IF p_source IN ('reply','deal') THEN
+    PERFORM 1 FROM public.organization_settings WHERE organization_id=p_organization_id AND crm_automation_enabled IS TRUE FOR SHARE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'CRM call automation is disabled' USING ERRCODE='23514';
+    END IF;
+    IF NULLIF(btrim(p_metadata#>>'{trigger,signal_id}'),'') IS NULL
+      OR NOT COALESCE((p_metadata->'trigger') ? 'inbound_id',false) THEN
+      RAISE EXCEPTION 'Automatic calls require a signal and inbound snapshot' USING ERRCODE='22023';
+    END IF;
+    SELECT id INTO v_inbound_id FROM public.deal_activities
+    WHERE organization_id=p_organization_id AND deal_id=p_deal_id AND activity_type IN ('email_in','linkedin_in')
+    ORDER BY created_at DESC,id DESC LIMIT 1;
+    IF v_inbound_id::text IS DISTINCT FROM p_metadata#>>'{trigger,inbound_id}' THEN
+      RAISE EXCEPTION 'Inbound activity changed while preparing the call' USING ERRCODE='23514';
+    END IF;
+    IF p_source='reply' AND (v_inbound_id IS NULL OR p_metadata#>>'{trigger,signal_id}' IS DISTINCT FROM v_inbound_id::text) THEN
+      RAISE EXCEPTION 'Reply signal does not match latest inbound' USING ERRCODE='23514';
+    END IF;
+    IF p_source='deal' AND (p_metadata#>>'{trigger,signal_id}')::timestamptz IS DISTINCT FROM v_deal.stage_updated_at THEN
+      RAISE EXCEPTION 'Deal stage changed while preparing the call' USING ERRCODE='23514';
+    END IF;
   END IF;
   INSERT INTO public.contact_notes(organization_id,contact_id,user_id,content,note_type,is_pinned)
   VALUES(p_organization_id,p_contact_id,p_actor_user_id,btrim(p_note),'call',false) RETURNING id INTO v_note_id;
