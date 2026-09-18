@@ -65,7 +65,8 @@ BEGIN
       RAISE EXCEPTION 'A contact phone is required' USING ERRCODE='23514';
     END IF;
     IF COALESCE(v_contact.do_not_contact,false) OR v_contact.unsubscribed_at IS NOT NULL
-      OR v_contact.automation_hold_at IS NOT NULL OR COALESCE(v_contact.open_to_work,false) THEN
+      OR v_contact.automation_hold_at IS NOT NULL OR NULLIF(btrim(v_contact.automation_hold_reason),'') IS NOT NULL
+      OR v_contact.ooo_until>now() OR COALESCE(v_contact.open_to_work,false) THEN
       RAISE EXCEPTION 'Contact is suppressed for calls' USING ERRCODE='23514';
     END IF;
     IF v_deal.closed_at IS NOT NULL THEN RAISE EXCEPTION 'Deal is closed' USING ERRCODE='23514'; END IF;

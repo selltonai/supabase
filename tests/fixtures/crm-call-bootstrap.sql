@@ -3,7 +3,7 @@ CREATE TYPE public.task_type AS ENUM ('review_draft','meeting','company_verifica
 CREATE TYPE public.task_status AS ENUM ('pending','in_progress','scheduled','in_review','approved','rejected','completed','cancelled');
 CREATE TABLE public."user" (id text PRIMARY KEY);
 CREATE TABLE public.user_organizations (user_id text, organization_id text);
-CREATE TABLE public.contacts (id uuid PRIMARY KEY, organization_id text, name text, phone text, do_not_contact boolean, unsubscribed_at timestamptz, automation_hold_at timestamptz, open_to_work boolean, stop_drafts boolean);
+CREATE TABLE public.contacts (id uuid PRIMARY KEY, organization_id text, name text, phone text, do_not_contact boolean, unsubscribed_at timestamptz, automation_hold_at timestamptz, automation_hold_reason text, ooo_until timestamptz, open_to_work boolean, stop_drafts boolean);
 CREATE TABLE public.deals (id uuid PRIMARY KEY, organization_id text, company_id uuid, primary_contact_id uuid, owner_user_id text, source_campaign_id uuid, stage text, closed_at timestamptz, stage_updated_at timestamptz);
 CREATE TABLE public.company_contacts (organization_id text, company_id uuid, contact_id uuid);
 CREATE TABLE public.contact_notes (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), organization_id text, contact_id uuid, user_id text, content text, note_type text, is_pinned boolean);

@@ -28,8 +28,8 @@ BEGIN
     RAISE EXCEPTION 'Held contact accepted';
   EXCEPTION WHEN check_violation THEN NULL; END;
   UPDATE public.contacts SET automation_hold_at=NULL;
-  FOREACH v_field IN ARRAY ARRAY['do_not_contact','open_to_work','unsubscribed_at'] LOOP
-    EXECUTE format('UPDATE public.contacts SET %I = %s',v_field,CASE WHEN v_field='unsubscribed_at' THEN 'now()' ELSE 'true' END);
+  FOREACH v_field IN ARRAY ARRAY['do_not_contact','open_to_work','unsubscribed_at','automation_hold_reason','ooo_until'] LOOP
+    EXECUTE format('UPDATE public.contacts SET %I = %s',v_field,CASE WHEN v_field='unsubscribed_at' THEN 'now()' WHEN v_field='automation_hold_reason' THEN '''manual_hold''' WHEN v_field='ooo_until' THEN 'now()+interval ''1 day''' ELSE 'true' END);
     BEGIN
       PERFORM public.create_crm_call_task('org-a','30000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','owner',now(),'Asked for pricing','Discuss requested pricing.', '{}');
       RAISE EXCEPTION 'Suppressed contact accepted: %',v_field;
