@@ -816,3 +816,10 @@ are inbound deal_activity UUIDs. A second unique index includes terminal tasks s
 an automatic signal cannot recreate a call after completion. Manual calls remain
 repeatable after completion. Reason-only hard holds and future ooo_until values
 are also rechecked before persistence.
+
+The service-only `crm_call_scan_state` table stores each organization's last
+scanned deal UUID and last scan timestamp. Modal uses resumable keyset pagination
+and least-recently-scanned organization ordering so bounded passes do not starve
+later deals or organizations. The organization FK cascades on deletion; the deal
+cursor intentionally has no FK and survives deal deletion. RLS has no browser
+policies; only service_role has SELECT/INSERT/UPDATE/DELETE privileges.

@@ -136,3 +136,31 @@ BEGIN
   EXCEPTION WHEN check_violation THEN NULL; END;
 END $$;
 ROLLBACK;
+
+-- Persisted fair-scan cursor is service-only and survives deal deletion.
+BEGIN;
+INSERT INTO public.organization(id) VALUES('org-call-cursor');
+DO $$
+BEGIN
+  IF has_table_privilege('authenticated','public.crm_call_scan_state','SELECT')
+    OR has_table_privilege('anon','public.crm_call_scan_state','INSERT')
+    OR NOT has_table_privilege('service_role','public.crm_call_scan_state','SELECT,INSERT,UPDATE,DELETE') THEN
+    RAISE EXCEPTION 'Call scan cursor access is not service-only';
+  END IF;
+  IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid='public.crm_call_scan_state'::regclass)
+    OR EXISTS(SELECT 1 FROM pg_policy WHERE polrelid='public.crm_call_scan_state'::regclass) THEN
+    RAISE EXCEPTION 'Call scan cursor RLS contract broken';
+  END IF;
+END $$;
+SET LOCAL ROLE service_role;
+INSERT INTO public.crm_call_scan_state(organization_id,last_deal_id)
+VALUES('org-call-cursor','90000000-0000-0000-0000-000000000099');
+UPDATE public.crm_call_scan_state SET last_deal_id=NULL,last_scanned_at=now() WHERE organization_id='org-call-cursor';
+RESET ROLE;
+DELETE FROM public.organization WHERE id='org-call-cursor';
+DO $$ BEGIN
+  IF EXISTS(SELECT 1 FROM public.crm_call_scan_state WHERE organization_id='org-call-cursor') THEN
+    RAISE EXCEPTION 'Organization deletion left a call scan cursor';
+  END IF;
+END $$;
+ROLLBACK;

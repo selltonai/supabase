@@ -260,3 +260,16 @@ REVOKE ALL ON FUNCTION public.delete_crm_deal(TEXT, UUID, TEXT)
   FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.delete_crm_deal(TEXT, UUID, TEXT)
   TO service_role;
+
+
+-- Durable keyset progress prevents a bounded scan starving later deal IDs.
+-- The cursor intentionally has no deal FK: deleted deals must not reset progress.
+CREATE TABLE IF NOT EXISTS public.crm_call_scan_state (
+  organization_id text PRIMARY KEY REFERENCES public.organization(id) ON DELETE CASCADE,
+  last_deal_id uuid,
+  last_scanned_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.crm_call_scan_state ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.crm_call_scan_state FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.crm_call_scan_state TO service_role;
+COMMENT ON TABLE public.crm_call_scan_state IS 'Service-only resumable call automation scan cursor and organization fairness timestamp; last_deal_id intentionally has no deal foreign key.';

@@ -1,4 +1,4 @@
-CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
+CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS;
 CREATE TYPE public.task_type AS ENUM ('review_draft','meeting','company_verification','manual_outreach','nurture_reminder','linkedin_connect','follow_up','custom');
 CREATE TYPE public.task_status AS ENUM ('pending','in_progress','scheduled','in_review','approved','rejected','completed','cancelled');
 CREATE TABLE public."user" (id text PRIMARY KEY);
@@ -12,3 +12,5 @@ CREATE TABLE public.tasks (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), organi
 CREATE TABLE public.notifications (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), type text CONSTRAINT notifications_type_check CHECK(type IN ('task_assigned','deal_created','linkedin_campaign_account_missing')));
 
 CREATE TABLE public.organization_settings (organization_id text PRIMARY KEY, crm_automation_enabled boolean NOT NULL DEFAULT false);
+
+CREATE TABLE public.organization (id text PRIMARY KEY);
