@@ -51,7 +51,7 @@ BEGIN
   EXCEPTION WHEN unique_violation THEN NULL; END;
   IF (SELECT count(*) FROM contact_notes)<>v_count THEN RAISE EXCEPTION 'Duplicate leaked orphan note'; END IF;
   BEGIN
-    UPDATE public.tasks SET status='approved' WHERE id=v_id;
+    UPDATE public.tasks SET status='in_review' WHERE id=v_id;
     RAISE EXCEPTION 'Call approved for dispatch';
   EXCEPTION WHEN check_violation THEN NULL; END;
   BEGIN
