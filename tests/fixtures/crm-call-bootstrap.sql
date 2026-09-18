@@ -1,5 +1,5 @@
 CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS;
-CREATE TYPE public.task_type AS ENUM ('review_draft','meeting','company_verification','manual_outreach','nurture_reminder','linkedin_connect','follow_up','custom');
+CREATE TYPE public.task_type AS ENUM ('review_draft','meeting','company_verification','email_generation_processing','review_reply','nurture_reminder','linkedin_connect','manual_outreach');
 CREATE TYPE public.task_status AS ENUM ('pending','in_progress','completed','cancelled','scheduled','failed','in_review');
 CREATE TABLE public."user" (id text PRIMARY KEY);
 CREATE TABLE public.user_organizations (user_id text, organization_id text);

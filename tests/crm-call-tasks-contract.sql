@@ -128,7 +128,11 @@ BEGIN
   UPDATE deals SET stage='MEETING_REQUESTED',stage_updated_at=now()-interval '4 days';
   SELECT jsonb_build_object('trigger',jsonb_build_object('signal_id',stage_updated_at,'inbound_id',null)) INTO v_metadata FROM deals;
   v_task := create_crm_call_task('org-a','30000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','owner',now(),'Meeting follow up','Follow up on the meeting request.',v_metadata,'deal');
-  UPDATE tasks SET status='completed',completed_by_user_id='owner',completed_at=now() WHERE id=(v_task->>'id')::uuid;
+  UPDATE tasks SET status='failed' WHERE id=(v_task->>'id')::uuid;
+  BEGIN
+    UPDATE tasks SET status='pending' WHERE id=(v_task->>'id')::uuid;
+    RAISE EXCEPTION 'Failed call reopened';
+  EXCEPTION WHEN check_violation THEN NULL; END;
   UPDATE deals SET stage_updated_at=now();
   BEGIN
     PERFORM create_crm_call_task('org-a','30000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','owner',now(),'Meeting follow up','Follow up on the meeting request.',v_metadata,'deal');

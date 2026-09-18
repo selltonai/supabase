@@ -34,3 +34,4 @@ migrations/next-release/374_ai-ark-company-provenance.sql
 migrations/release_1.3.0/370_billing-invoice-link-recovery.sql
 migrations/next-release/375_crm-call-task-type.sql
 migrations/next-release/376_crm-call-task-workflows.sql
+migrations/next-release/377_crm-call-task-status-guard.sql

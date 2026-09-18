@@ -792,7 +792,7 @@ scope/safety/lifecycle violation,22023 means invalid input andP0002 means not fo
 
 Next.js uses `snooze_crm_call_task(p_organization_id,p_task_id,p_actor_user_id)` to
 move a pending task to `max(now,due_date)+1day`. Completion remains the existing
-owner-authorized Tasks update. Calls allow pending/completed/cancelled/rejected;
+owner-authorized Tasks update. Calls allow pending/completed/cancelled/failed;
 terminal calls cannot reopen or change into sendable task types. Existing generic
 deal owner sync and task activity auditing apply unchanged. Deal close/delete
 cancel pending calls, and FK contact/deal deletion retains cancelled history.
@@ -823,3 +823,9 @@ and least-recently-scanned organization ordering so bounded passes do not starve
 later deals or organizations. The organization FK cascades on deletion; the deal
 cursor intentionally has no FK and survives deal deletion. RLS has no browser
 policies; only service_role has SELECT/INSERT/UPDATE/DELETE privileges.
+
+Call workflow migration376 was corrected by immutable follow-up377: the actual
+stage `task_status` enum has `failed`, not `rejected` or `approved`. Apply377 after
+376 before using calls. The disposable fixture now uses the exact verified stage
+status enum. Older schema examples elsewhere in this document are illustrative
+and are not an authority for deployed enum values.

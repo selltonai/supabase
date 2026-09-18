@@ -9,7 +9,7 @@ for attempt in {1..30}; do
   if docker exec "$container" pg_isready -U postgres >/dev/null 2>&1; then break; fi
   sleep 1
 done
-for sql in tests/fixtures/crm-call-bootstrap.sql migrations/release_1.3.0/352_crm-deal-task-workflows.sql migrations/next-release/375_crm-call-task-type.sql migrations/next-release/376_crm-call-task-workflows.sql migrations/next-release/375_crm-call-task-type.sql migrations/next-release/376_crm-call-task-workflows.sql tests/crm-call-tasks-contract.sql; do
+for sql in tests/fixtures/crm-call-bootstrap.sql migrations/release_1.3.0/352_crm-deal-task-workflows.sql migrations/next-release/375_crm-call-task-type.sql migrations/next-release/376_crm-call-task-workflows.sql migrations/next-release/375_crm-call-task-type.sql migrations/next-release/376_crm-call-task-workflows.sql migrations/next-release/377_crm-call-task-status-guard.sql migrations/next-release/377_crm-call-task-status-guard.sql tests/crm-call-tasks-contract.sql; do
   echo "Checking $sql"
   docker exec -i "$container" psql -X -q -U postgres -v ON_ERROR_STOP=1 < "$sql"
 done
