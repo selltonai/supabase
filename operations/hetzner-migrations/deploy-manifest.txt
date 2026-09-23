@@ -36,3 +36,4 @@ migrations/release_1.3.0/372_ac13_filter_companies_by_campaign_status.sql
 migrations/next-release/375_crm-call-task-type.sql
 migrations/next-release/376_crm-call-task-workflows.sql
 migrations/next-release/377_crm-call-task-status-guard.sql
+migrations/next-release/378_company-retry-state.sql
