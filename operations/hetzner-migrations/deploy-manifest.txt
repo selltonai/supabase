@@ -37,3 +37,4 @@ migrations/next-release/375_crm-call-task-type.sql
 migrations/next-release/376_crm-call-task-workflows.sql
 migrations/next-release/377_crm-call-task-status-guard.sql
 migrations/next-release/378_company-retry-state.sql
+migrations/next-release/380_linkedin-counterpart-lookup-indexes.sql
