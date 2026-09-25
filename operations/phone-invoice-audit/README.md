@@ -39,6 +39,10 @@ stored invoice line items. The audit has no application-code dependency.
   period, so its $0 Phones display is correct for recorded lookup usage.
 - Production currently has 75 contacts with phone values in IGA's workspace.
   A phone value alone does not establish a billable Airscale lookup.
+- Of those, 35 have no matching Airscale usage row. All 35 were created at the
+  same September 23 timestamp; 33 have not changed since insertion, and 33 are
+  not linked to a campaign. This is consistent with a bulk import. It is not
+  evidence of additional billable lookups, so no extra charge was made.
 - Stage has no IGA workspace. Across stage, 35 Airscale phone rows ($21) use
   `company_contact_service`, while 15 ($9) use `phone_discovery_service`.
 
