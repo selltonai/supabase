@@ -160,6 +160,8 @@ and must contain a sanitized, non-secret failure summary.
 
 Migration `release_1.3.0/370_billing-invoice-link-recovery.sql` must precede the Modal billing-recovery release. It adds internal `billing_invoices.usage_link_state` (`legacy`, `pending`, `awaiting_payment`, `linked`) and the service-role-only `billing_usage_for_period_v1` RPC, aggregating exact half-open UTC periods `[start, end)`. Old writers default to `legacy`, which is excluded from automatic recovery. Modal writes `pending` for weekly invoices and `awaiting_payment` for bill-now invoices; the latter may be linked only after confirmed payment. Invoice linkage uses batches of 250 and retries through the hourly billing cron. New invoices cannot reuse usage from unresolved overlapping invoices.
 
+Migration `next-release/381_phone-usage-billing-category.sql` keeps the same billing RPC response while classifying Airscale phone finder rows as `phone_discovery_service`, including older uninvoiced rows from contact discovery. Deploy it with the Modal producer fix. Existing paid invoice line items remain unchanged and need an evidence-based reconciliation before any correction.
+
 Monthly limits count all billable usage occurring in the calendar month exactly once, independent of `usage.invoice_id`, plus infrastructure/user fees on nonfailed invoices ending in the month and pending current-cycle fees. Usage from the previous month on a weekly invoice is excluded. Existing spend-limit response fields and dispatch-suspension contracts are preserved; invoice totals remain unchanged. Legacy invoice-link reconciliation requires explicit subtotal/period validation and is not part of the schema migration.
 
 ### Usage Analytics projection
