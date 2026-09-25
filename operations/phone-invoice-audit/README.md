@@ -42,11 +42,16 @@ stored invoice line items. The audit has no application-code dependency.
 - Stage has no IGA workspace. Across stage, 35 Airscale phone rows ($21) use
   `company_contact_service`, while 15 ($9) use `phone_discovery_service`.
 
-`iga-2026-09-07-relabel.sql` is a reviewed, invoice-specific candidate to
-correct the category shown in SelltonAI for the paid September 7–14 invoice.
+`iga-2026-09-07-relabel.sql` is the invoice-specific correction for the
+category shown in SelltonAI for the paid September 7–14 invoice.
 It changes `billing_invoices.line_items` only, splitting $36 to Phone discovery
 and leaving Contact enrichment at $4.0905. It keeps subtotal, total, Stripe
 invoice, and usage rows unchanged. Its identity, usage, line-item, and amount
 guards abort if live data has changed. The script passed once in a disposable
-PostgreSQL 15 fixture; a second application correctly failed. It has not been
-run in production. Review it and take a fresh backup before any approved write.
+PostgreSQL 15 fixture; a second application correctly failed. It was applied
+to production on September 25, 2026 after a verified full migration backup and
+a fresh `billing_invoices` backup at
+`/opt/sellton/backups/database-migrations/production/iga-phone-invoices-20260925T093713Z.dump`.
+Post-change read-only checks confirmed the $36.00 Phones line, $4.0905 Contact
+enrichment line, unchanged $63.20 subtotal/$82.70 total, unchanged paid/Stripe
+state, and unchanged 60 Airscale usage rows. Do not run the relabel script again.
