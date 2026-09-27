@@ -28,7 +28,8 @@
 -- a long transaction (the runner rolls the file back and it can be re-run).
 SET LOCAL lock_timeout = '10s';
 
--- Prices, trial length and credit, referral credit and cap: one row per key.
+-- Prices, the web and phone trials (length and credit, set apart), referral
+-- credit and cap: one row per key.
 -- The weekly seat rate is never stored; it is the 4-week price divided by 4.
 CREATE TABLE IF NOT EXISTS public.billing_settings (
   key         text PRIMARY KEY,
@@ -47,8 +48,10 @@ INSERT INTO public.billing_settings (key, value, unit, description) VALUES
   ('infrastructure_fee_4w_usd',   33.00, 'usd',   'Every 4 weeks, upfront, web orgs only (8.25 a week today)'),
   ('seat_web_4w_usd',             15.00, 'usd',   'Per person every 4 weeks when the org is on the web; a week = a quarter of it'),
   ('seat_mobile_4w_usd',           6.00, 'usd',   'Per activated person every 4 weeks, phone-only orgs; a week = a quarter of it'),
-  ('trial_days',                      7, 'days',  'Trial length, both apps'),
-  ('trial_credit_usd',            10.00, 'usd',   'Usage covered during the trial, both apps'),
+  ('trial_web_days',                  7, 'days',  'Web trial length, per workspace'),
+  ('trial_web_credit_usd',        40.00, 'usd',   'Usage covered during the web trial'),
+  ('trial_mobile_days',               7, 'days',  'Phone trial length, per person'),
+  ('trial_mobile_credit_usd',     10.00, 'usd',   'Usage covered during the phone trial, per person'),
   ('referral_credit_usd',         10.00, 'usd',   'To the referrer once the referred person activates past the free usage'),
   ('referral_max',                    5, 'count', 'Referrals credited per person; staff may raise it per org')
 ON CONFLICT (key) DO NOTHING;
@@ -143,7 +146,7 @@ REVOKE ALL ON TABLE public.billing_referrals FROM PUBLIC, anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.billing_referrals TO service_role;
 
 -- Verify (after each run; the second run must change nothing):
--- SELECT count(*) = 9 AS settings_seeded FROM public.billing_settings;
+-- SELECT count(*) = 11 AS settings_seeded FROM public.billing_settings;
 -- SELECT column_name FROM information_schema.columns
 --  WHERE table_schema = 'public' AND table_name = 'organization'
 --    AND column_name IN ('web_billing_started_at', 'mobile_billing_started_at',

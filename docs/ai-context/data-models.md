@@ -744,14 +744,14 @@ columns on the canonical `user` identity table.
 
 | Column | Type | Constraints | Description | RLS |
 |--------|------|-------------|-------------|-----|
-| `key` | text | PK | Setting key (9 seeded, below) | ✅ service_role only |
+| `key` | text | PK | Setting key (11 seeded, below) | ✅ service_role only |
 | `value` | numeric(12,2) | NOT NULL, CHECK >= 0 | The value | ✅ |
 | `unit` | text | NOT NULL, CHECK IN (usd, days, count) | How to read the value | ✅ |
 | `description` | text | | What it is for | ✅ |
 | `updated_by` | text | | Staff email of the last change | ✅ |
 | `updated_at` | timestamptz | NOT NULL DEFAULT now(), trigger | Last change | ✅ |
 
-Seeded keys: `activation_fee_tier1_usd` 500, `activation_fee_tier2_usd` 1500, `infrastructure_fee_4w_usd` 33, `seat_web_4w_usd` 15, `seat_mobile_4w_usd` 6, `trial_days` 7, `trial_credit_usd` 10, `referral_credit_usd` 10, `referral_max` 5.
+Seeded keys: `activation_fee_tier1_usd` 500, `activation_fee_tier2_usd` 1500, `infrastructure_fee_4w_usd` 33, `seat_web_4w_usd` 15, `seat_mobile_4w_usd` 6, `trial_web_days` 7, `trial_web_credit_usd` 40, `trial_mobile_days` 7, `trial_mobile_credit_usd` 10, `referral_credit_usd` 10, `referral_max` 5.
 
 ---
 

@@ -155,7 +155,7 @@ and must contain a sanitized, non-secret failure summary.
 | **billing_invoices** | selltonai-modal | selltonai, backoffice | Usage invoices, totals, Stripe invoice ids, and hosted invoice links |
 | **billing_invoice_sequences** | selltonai-modal | selltonai-modal | Year-scoped reservation state for explicit Stripe invoice numbers like `SLTN-2026/100001` |
 | **usage** | selltonai-modal | selltonai, backoffice | Billable usage rows linked to generated invoices |
-| **billing_settings** | backoffice | backoffice; selltonai-modal and selltonai from their billing releases | One row per price or rule (`usd`, `days`, `count`): activation tiers, 4-week infrastructure and seat prices, trial length and credit, referral credit and cap |
+| **billing_settings** | backoffice | backoffice; selltonai-modal and selltonai from their billing releases | One row per price or rule (`usd`, `days`, `count`): activation tiers, 4-week infrastructure and seat prices, the web and phone trials (length and credit, set apart), referral credit and cap |
 | **billing_credits** | backoffice (manual, trial); selltonai-modal draws it down from its billing release | backoffice, selltonai-modal | Credits ledger: `trial`, `referral`, `manual`, with remaining amount and expiry |
 | **billing_referrals** | selltonai and the mobile service (their releases) | backoffice | Who referred whom, the status, and the credit it earned |
 
