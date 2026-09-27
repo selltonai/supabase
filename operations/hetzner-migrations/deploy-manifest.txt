@@ -39,3 +39,4 @@ migrations/next-release/377_crm-call-task-status-guard.sql
 migrations/next-release/378_company-retry-state.sql
 migrations/next-release/380_linkedin-counterpart-lookup-indexes.sql
 migrations/next-release/381_phone-usage-billing-category.sql
+migrations/next-release/383_claim-failed-sequence-action-retries.sql
