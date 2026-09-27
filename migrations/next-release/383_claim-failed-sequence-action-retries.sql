@@ -23,10 +23,14 @@
 -- discovery_completed.
 --
 -- Design:
--- - New branch: status='failed' AND retry_at IS NOT NULL AND retry_at <= p_now.
---   An exhausted action has retry_at=NULL and is never selected. Other writers
---   of status='failed' (the scheduled-dispatch retry cap in the claim route)
---   already set retry_at=NULL, so they stay terminal.
+-- - New branch: status='failed' AND retry_at IS NOT NULL AND retry_at <= p_now
+--   AND retry_at > p_now - 7 days. An exhausted action has retry_at=NULL and is
+--   never selected. Other writers of status='failed' (the scheduled-dispatch
+--   retry cap in the claim route) already set retry_at=NULL, so they stay
+--   terminal. The BFF's backoff is at most 60 min, so the 7-day bound never cuts
+--   off a live retry; it only keeps failed rows from before this migration (the
+--   retry that never ran, possibly months old) asleep on apply. Those rows and
+--   their journeys need a one-off decision, not a surprise send.
 -- - Locking and lease semantics are unchanged: same FOR UPDATE SKIP LOCKED
 --   sub-select, same UPDATE to status='claimed' with the lease, attempts+1,
 --   same ORDER BY scheduled_at NULLS FIRST and LIMIT.
@@ -37,14 +41,15 @@
 --   rejects CONCURRENTLY): it takes a SHARE lock on campaign_sequence_actions
 --   until the file commits; lock_timeout makes the file fail and roll back
 --   instead of queueing writers. Re-run it (idempotent).
--- - Existing failed rows whose retry_at is already past become claimable on
---   apply (25 per tick, oldest scheduled_at first). Stage had none on
---   2026-09-25; count them first on any other environment (verify query 3).
+-- - Existing failed rows whose retry_at fell in the last 7 days become
+--   claimable on apply (25 per tick, oldest scheduled_at first). Stage had none
+--   on 2026-09-25; count them first on any other environment (verify query 3).
 --
 -- Idempotency: CREATE OR REPLACE FUNCTION; CREATE INDEX IF NOT EXISTS;
 -- REVOKE/GRANT/COMMENT are re-runnable.
 --
--- Rollback (restores the 267 definition verbatim, then drops the index):
+-- Rollback (restores the 267 definition verbatim — no failed branch at all —
+-- then drops the index):
 --   CREATE OR REPLACE FUNCTION public.claim_due_sequence_actions(
 --     p_now              TIMESTAMPTZ,
 --     p_lease_expires_at TIMESTAMPTZ,
@@ -131,10 +136,12 @@ BEGIN
              AND csa.lease_expires_at < p_now)
          OR
             -- KAN-306 W12: a failed action whose backoff retry is due.
-            -- Exhausted actions have retry_at NULL and are never selected.
+            -- Exhausted actions have retry_at NULL and are never selected;
+            -- retries older than 7 days (pre-383 leftovers) stay asleep.
             (csa.status = 'failed'
              AND csa.retry_at IS NOT NULL
-             AND csa.retry_at <= p_now)
+             AND csa.retry_at <= p_now
+             AND csa.retry_at > p_now - interval '7 days')
            )
      ORDER BY csa.scheduled_at NULLS FIRST
      LIMIT p_batch_size
@@ -161,7 +168,7 @@ REVOKE ALL ON FUNCTION public.claim_due_sequence_actions(TIMESTAMPTZ, TIMESTAMPT
 GRANT EXECUTE ON FUNCTION public.claim_due_sequence_actions(TIMESTAMPTZ, TIMESTAMPTZ, INTEGER) TO service_role;
 
 COMMENT ON FUNCTION public.claim_due_sequence_actions IS
-  'V3 P1-1 atomic claim primitive (updated 2026-05-06 to treat NULL scheduled_at as ASAP; 2026-09-27 KAN-306 W12 to re-claim failed rows whose retry_at is due). Used by /api/internal/sequence/claim. SECURITY DEFINER.';
+  'V3 P1-1 atomic claim primitive (updated 2026-05-06 to treat NULL scheduled_at as ASAP; 2026-09-27 KAN-306 W12 to re-claim failed rows whose retry_at is due within the last 7 days). Used by /api/internal/sequence/claim. SECURITY DEFINER.';
 
 CREATE INDEX IF NOT EXISTS idx_campaign_sequence_actions_failed_retry
   ON public.campaign_sequence_actions (retry_at)
@@ -176,8 +183,9 @@ CREATE INDEX IF NOT EXISTS idx_campaign_sequence_actions_failed_retry
 --   2. Grants unchanged (service_role only):
 --        SELECT grantee, privilege_type FROM information_schema.routine_privileges
 --         WHERE routine_name = 'claim_due_sequence_actions';
---   3. What becomes claimable on apply (run BEFORE and after):
---        SELECT count(*) AS failed_retry_due,
+--   3. What becomes claimable on apply, and what stays asleep (run BEFORE):
+--        SELECT count(*) FILTER (WHERE retry_at > now() - interval '7 days') AS failed_retry_due,
+--               count(*) FILTER (WHERE retry_at <= now() - interval '7 days') AS failed_older_than_7d_stay_asleep,
 --               min(retry_at) AS oldest_retry_at
 --          FROM public.campaign_sequence_actions
 --         WHERE status = 'failed' AND retry_at IS NOT NULL AND retry_at <= now();

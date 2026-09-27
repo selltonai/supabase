@@ -41,7 +41,11 @@ VALUES
   ('30000000-0000-0000-0000-000000000107', '30000000-0000-0000-0000-000000000001', 'linkedin', 'linkedin_invitation',
    'claimed', '2026-09-27T09:00:00Z', NULL, '2026-09-27T12:03:00Z', 1),  -- lease still live
   ('30000000-0000-0000-0000-000000000108', '30000000-0000-0000-0000-000000000001', 'linkedin', 'linkedin_invitation',
-   'pending', '2026-09-27T09:00:00Z', '2026-09-27T12:10:00Z', NULL, 0);  -- pending, retry_at in the future
+   'pending', '2026-09-27T09:00:00Z', '2026-09-27T12:10:00Z', NULL, 0),  -- pending, retry_at in the future
+  ('30000000-0000-0000-0000-000000000109', '30000000-0000-0000-0000-000000000001', 'linkedin', 'linkedin_invitation',
+   'failed', '2026-07-01T09:00:00Z', '2026-07-01T09:05:00Z', NULL, 1),   -- pre-383 retry, months old
+  ('30000000-0000-0000-0000-000000000110', '30000000-0000-0000-0000-000000000001', 'linkedin', 'linkedin_invitation',
+   'failed', '2026-09-20T11:00:00Z', '2026-09-20T12:00:00Z', NULL, 1);   -- exactly 7 days old: excluded (bound is >)
 
 DO $$
 DECLARE
@@ -59,7 +63,7 @@ BEGIN
     '30000000-0000-0000-0000-000000000102',
     '30000000-0000-0000-0000-000000000103'
   ]::uuid[] THEN
-    RAISE EXCEPTION 'claim must return pending-due, lease-expired and failed-retry-due rows only, got %', claimed_ids;
+    RAISE EXCEPTION 'claim must return pending-due, lease-expired and failed-retry-due (last 7 days) rows only, got %', claimed_ids;
   END IF;
 
   -- The failed row is claimed exactly like the others (lease, attempts + 1).
@@ -81,12 +85,14 @@ BEGIN
        '30000000-0000-0000-0000-000000000105',
        '30000000-0000-0000-0000-000000000106',
        '30000000-0000-0000-0000-000000000107',
-       '30000000-0000-0000-0000-000000000108'
+       '30000000-0000-0000-0000-000000000108',
+       '30000000-0000-0000-0000-000000000109',
+       '30000000-0000-0000-0000-000000000110'
      )
        AND status = 'claimed'
        AND lease_expires_at = '2026-09-27T12:05:00Z'::timestamptz
   ) THEN
-    RAISE EXCEPTION 'exhausted, not-yet-due, skipped, live-lease and future-retry rows must not be claimed';
+    RAISE EXCEPTION 'exhausted, not-yet-due, older-than-7-days, skipped, live-lease and future-retry rows must not be claimed';
   END IF;
 
   -- A second call in the same instant claims nothing more.
