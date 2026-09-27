@@ -658,6 +658,9 @@ columns on the canonical `user` identity table.
 | `spend_resets_at` | timestamptz | | When spend resets | ✅ |
 | `status` | text | | active, suspended, cancelled | ✅ |
 | `metadata` | jsonb | | Additional metadata | ✅ |
+| `trial_started_at` | timestamptz | | Web trial start (382); one trial per org, ever | ✅ |
+| `trial_ends_at` | timestamptz | | Web trial end (382) | ✅ |
+| `trial_granted_by` | text | | Staff actor who granted the trial; NULL = started with a card (382) | ✅ |
 | `created_at` | timestamptz | DEFAULT now() | Creation timestamp | ✅ |
 | `updated_at` | timestamptz | DEFAULT now() | Last update timestamp | ✅ |
 
@@ -730,6 +733,75 @@ columns on the canonical `user` identity table.
 | `period_start` | timestamptz | | Usage period start | ✅ |
 | `period_end` | timestamptz | | Usage period end | ✅ |
 | `created_at` | timestamptz | DEFAULT now() | Creation timestamp | ✅ |
+
+---
+
+### billing_settings
+
+**Primary Writer**: backoffice (settings page)  
+**Primary Readers**: backoffice; selltonai-modal and selltonai from their billing releases  
+**Purpose**: One row per price or rule of the billing model (migration 382, KAN-317). The weekly seat rate is never stored: it is the 4-week price divided by 4.
+
+| Column | Type | Constraints | Description | RLS |
+|--------|------|-------------|-------------|-----|
+| `key` | text | PK | Setting key (9 seeded, below) | ✅ service_role only |
+| `value` | numeric(12,2) | NOT NULL, CHECK >= 0 | The value | ✅ |
+| `unit` | text | NOT NULL, CHECK IN (usd, days, count) | How to read the value | ✅ |
+| `description` | text | | What it is for | ✅ |
+| `updated_by` | text | | Staff email of the last change | ✅ |
+| `updated_at` | timestamptz | NOT NULL DEFAULT now(), trigger | Last change | ✅ |
+
+Seeded keys: `activation_fee_tier1_usd` 500, `activation_fee_tier2_usd` 1500, `infrastructure_fee_4w_usd` 33, `seat_web_4w_usd` 15, `seat_mobile_4w_usd` 6, `trial_days` 7, `trial_credit_usd` 10, `referral_credit_usd` 10, `referral_max` 5.
+
+---
+
+### billing_credits
+
+**Primary Writer**: backoffice (manual and trial credits); selltonai-modal draws `remaining_usd` down from its billing release  
+**Primary Readers**: backoffice, selltonai-modal  
+**Purpose**: Credits ledger (migration 382)
+
+| Column | Type | Constraints | Description | RLS |
+|--------|------|-------------|-------------|-----|
+| `id` | uuid | PK DEFAULT gen_random_uuid() | Credit ID | ✅ service_role only |
+| `organization_id` | text | NOT NULL, FK → organization(id) ON DELETE CASCADE | Owning organization | ✅ |
+| `kind` | text | NOT NULL, CHECK IN (trial, referral, manual) | Where it came from | ✅ |
+| `amount_usd` | numeric(10,2) | NOT NULL, CHECK > 0 | Amount granted | ✅ |
+| `remaining_usd` | numeric(10,2) | NOT NULL, CHECK >= 0 | Amount left; 0 = used or voided | ✅ |
+| `source` | text | | Referral id, discount code, or the staff note | ✅ |
+| `expires_at` | timestamptz | | Unusable after this | ✅ |
+| `created_by` | text | NOT NULL | Staff email or the writing service | ✅ |
+| `created_at` | timestamptz | NOT NULL DEFAULT now() | Creation timestamp | ✅ |
+| `updated_at` | timestamptz | NOT NULL DEFAULT now(), trigger | Last update timestamp | ✅ |
+
+**Indexes**: `billing_credits_org_open_idx` ON `billing_credits(organization_id)` WHERE `remaining_usd > 0`
+
+---
+
+### billing_referrals
+
+**Primary Writer**: selltonai and the mobile service (their releases)  
+**Primary Readers**: backoffice  
+**Purpose**: Who referred whom, and the credit it earned (migration 382)
+
+| Column | Type | Constraints | Description | RLS |
+|--------|------|-------------|-------------|-----|
+| `id` | uuid | PK DEFAULT gen_random_uuid() | Referral ID | ✅ service_role only |
+| `referrer_org_id` | text | NOT NULL, FK → organization(id) ON DELETE CASCADE | Referring organization | ✅ |
+| `referrer_user_id` | text | NOT NULL | Referring person | ✅ |
+| `referred_org_id` | text | FK → organization(id) ON DELETE SET NULL | Organization the referred person joined | ✅ |
+| `referred_email` | text | NOT NULL | Invited email | ✅ |
+| `status` | text | NOT NULL DEFAULT 'invited', CHECK IN (invited, card_added, activated, credited, rejected) | Progress | ✅ |
+| `credit_id` | uuid | FK → billing_credits(id) ON DELETE SET NULL | The referral credit, once granted | ✅ |
+| `created_at` | timestamptz | NOT NULL DEFAULT now() | Creation timestamp | ✅ |
+| `updated_at` | timestamptz | NOT NULL DEFAULT now(), trigger | Last update timestamp | ✅ |
+
+**Indexes**: `billing_referrals_referrer_idx` ON `billing_referrals(referrer_org_id, referrer_user_id)`
+
+**Columns 382 adds to existing tables** (all nullable):
+- `organization`: `web_billing_started_at`, `mobile_billing_started_at`, `billing_cycle_anchor` (date), `fees_paused_at`, `referral_limit` (integer, CHECK >= 0). Written by the apps; the backoffice overrides them for fixes.
+- `org_seats`: `mobile_trial_started_at`, `mobile_trial_ends_at`, `mobile_activated_at` (the person pays the phone seat from here).
+- `activation_fees`: `tier` (CHECK IN tier1, tier2, invoiced).
 
 ---
 
