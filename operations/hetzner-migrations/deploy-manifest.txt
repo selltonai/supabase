@@ -30,3 +30,16 @@ migrations/release_1.3.0/370_billing-invoice-link-recovery.sql
 migrations/release_1.3.0/371_company-retry-state.sql
 migrations/release_1.3.0/372_linkedin-counterpart-lookup-indexes.sql
 migrations/release_1.3.0/373_phone-usage-billing-category.sql
+# Stage additions for production; preserve the 30 applied main entries above.
+migrations/release_1.3.0/370_deal-delete-and-brief-metadata.sql
+migrations/release_1.3.0/371_restore-deal-activity-rpc-guards.sql
+migrations/next-release/372_crm-company-delete-deal-cleanup.sql
+migrations/next-release/373_contacts-professional-summary.sql
+migrations/next-release/374_ai-ark-company-provenance.sql
+migrations/release_1.3.0/372_ac13_filter_companies_by_campaign_status.sql
+migrations/next-release/375_crm-call-task-type.sql
+migrations/next-release/376_crm-call-task-workflows.sql
+migrations/next-release/377_crm-call-task-status-guard.sql
+migrations/next-release/383_claim-failed-sequence-action-retries.sql
+migrations/next-release/384_crm-deal-signal-activity.sql
+migrations/release_1.4.0/371_billing-start-anchor.sql
