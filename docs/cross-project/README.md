@@ -113,6 +113,20 @@ CRM workflow additions:
   enforces this for both the operator RPC and direct settings writes.
 - Additive task enum values are `nurture_reminder`, `linkedin_connect`, and
   `manual_outreach`; Backoffice generic task aggregation remains compatible.
+- Migration `370_deal-delete-and-brief-metadata.sql` adds
+  `companies.sales_brief_generated_at`, replaces
+  `finish_crm_manual_outreach_copy(...)` with the additive
+  `p_reasoning_note` argument, and adds service-role-only
+  `delete_crm_deal(organization, deal, actor)`. Deal deletion first cancels
+  open deal-workflow tasks, records `cancelled_reason = 'deal_deleted'`, and
+  then hard-deletes the deal. Browser roles cannot execute either RPC.
+- Migration `next-release/372_crm-company-delete-deal-cleanup.sql` runs that
+  same deal cleanup before a company is deleted. This cancels open deal-workflow
+  tasks and clears their deal references before the company foreign key clears
+  company references. It prevents task-scope validation from seeing a deleted
+  deal during a company cascade (KAN-304). Completed task history and normal
+  organization/company/contact validation remain intact. Modal list deletion
+  and frontend company deletion require no request/response changes.
 
 ### Document & Email Tables
 
@@ -549,6 +563,15 @@ CREATE INDEX idx_table_name_pending ON table_name(organization_id, status)
 
 ## JSONB Field Contracts
 
+### contacts.professional_summary (KAN-305 A4)
+
+Additive migration `migrations/next-release/373_contacts-professional-summary.sql`
+must precede deployment of the Modal AI Ark mapper. It defaults to `{}` and holds
+department, seniority, function, tenure months, `source: "ai_ark"`, `fetched_at`,
+and provider snapshot `as_of`. Modal produces it; LinkedIn context consumes its
+bounded professional fields. Keep it separate from LLM `analysis` and Unipile's
+`linkedin_profile`. Existing API shapes, contact columns, and RLS are unchanged.
+
 ### companies.b2b_result
 
 ```typescript
@@ -744,3 +767,67 @@ supabase migration down
 **Last Updated**: May 20, 2026
 **Maintained By**: Database team, update on schema changes  
 **Purpose**: Shared database contracts for all services
+
+
+### CRM call tasks (KAN-305)
+
+Apply `375_crm-call-task-type.sql` in its own committed transaction before
+`376_crm-call-task-workflows.sql`. `task_type=call` is human work with
+`metadata.channel=phone`; it must never enter approve/send dispatch.
+
+Modal calls service-role-only `create_crm_call_task(organization_id, deal_id,
+contact_id, actor_user_id, due_date, note, pitch, metadata, source)` using the
+`p_`-prefixed named RPC parameters. It returns the task JSON. Source defaults to
+`manual`; `reply` and `deal` are automatic sources. The RPC atomically writes the
+canonical contact note, its deal activity, and the task; assignee/company/campaign
+come from the locked deal. Metadata channel/source/note_id/note_to_ai/pitch/phone
+are canonical overrides. Empty notes, >5000-character notes, empty/>60-word
+pitches, missing phone, hard contact suppressions, closed deals, unrelated contacts,
+and invalid actor/owner organization membership fail the transaction. One open
+call per deal is enforced both under the deal lock and by a partial unique index.
+`stop_drafts` alone retains its sequence-boundary meaning and does not imply a hold.
+
+The authenticated Next.js BFF and Modal ingress enforce owner-or-manager access
+before invoking these service-role RPCs; database membership checks do not grant
+manager privileges. SQLSTATE23505 means an existing open call,23514 means a
+scope/safety/lifecycle violation,22023 means invalid input andP0002 means not found.
+
+Next.js uses `snooze_crm_call_task(p_organization_id,p_task_id,p_actor_user_id)` to
+move a pending task to `max(now,due_date)+1day`. Completion remains the existing
+owner-authorized Tasks update. Calls allow pending/completed/cancelled/failed;
+terminal calls cannot reopen or change into sendable task types. Existing generic
+deal owner sync and task activity auditing apply unchanged. Deal close/delete
+cancel pending calls, and FK contact/deal deletion retains cancelled history.
+
+`call_due` extends the existing notifications CHECK without removing any installed
+types. `notify_call_tasks` is an application-managed user_profiles notification
+preferences JSONB key; no dedicated database column or backfill is required.
+
+Run `bash tests/run-crm-call-contract.sh` for disposable PostgreSQL15 tests,
+including repeat migration application, tenant boundaries, suppression, atomicity,
+deduplication, ownership, snooze/completion/close/delete and dispatch prevention.
+The bootstrap deliberately models the touched schema and loads the real existing
+352 workflow functions; it is not a full deployed-schema replay.
+
+Automatic sources additionally require `metadata.trigger.signal_id` and an explicit
+`metadata.trigger.inbound_id` (JSON null when there was no inbound). Creation
+rechecks organization `crm_automation_enabled`, latest inbound activity identity
+(ordered by created_at then id descending), and reply/deal signal identity after
+pitch generation. Deal signal IDs are stage_updated_at timestamps; reply signal IDs
+are inbound deal_activity UUIDs. A second unique index includes terminal tasks so
+an automatic signal cannot recreate a call after completion. Manual calls remain
+repeatable after completion. Reason-only hard holds and future ooo_until values
+are also rechecked before persistence.
+
+The service-only `crm_call_scan_state` table stores each organization's last
+scanned deal UUID and last scan timestamp. Modal uses resumable keyset pagination
+and least-recently-scanned organization ordering so bounded passes do not starve
+later deals or organizations. The organization FK cascades on deletion; the deal
+cursor intentionally has no FK and survives deal deletion. RLS has no browser
+policies; only service_role has SELECT/INSERT/UPDATE/DELETE privileges.
+
+Call workflow migration376 was corrected by immutable follow-up377: the actual
+stage `task_status` enum has `failed`, not `rejected` or `approved`. Apply377 after
+376 before using calls. The disposable fixture now uses the exact verified stage
+status enum. Older schema examples elsewhere in this document are illustrative
+and are not an authority for deployed enum values.
