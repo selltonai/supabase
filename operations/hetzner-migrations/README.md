@@ -9,6 +9,12 @@ Full repository path plus SHA-256 is the migration identity. Numeric prefixes ar
 Sellton branches—for example, stage CRM migration `release-next/344_*` and main Backoffice migration
 `release_1.3.0/344_*` are different migrations.
 
+The manifest completeness check accepts an unlisted file only when its SQL bytes
+exactly match a listed file. This accommodates stage and main copies of the same
+already-applied migration without adding a second path to the deploy manifest.
+The runner still treats the full path plus SHA-256 as its identity; hash equality
+in this check does not mark an unlisted path as applied.
+
 ## Commands
 
 Run from `selltonai-database/supabase`:
