@@ -766,6 +766,7 @@ Seeded keys: `activation_fee_tier1_usd` 500, `activation_fee_tier2_usd` 1500, `i
 | `id` | uuid | PK DEFAULT gen_random_uuid() | Credit ID | ✅ service_role only |
 | `organization_id` | text | NOT NULL, FK → organization(id) ON DELETE CASCADE | Owning organization | ✅ |
 | `kind` | text | NOT NULL, CHECK IN (trial, referral, manual) | Where it came from | ✅ |
+| `trial_product` | text | Nullable; CHECK web/mobile only for kind trial (384) | Distinguishes web and phone trial credits; unknown legacy sources stay NULL | ✅ |
 | `amount_usd` | numeric(10,2) | NOT NULL, CHECK > 0 | Amount granted | ✅ |
 | `remaining_usd` | numeric(10,2) | NOT NULL, CHECK >= 0 | Amount left; 0 = used or voided | ✅ |
 | `source` | text | | Referral id, discount code, or the staff note | ✅ |
@@ -775,6 +776,26 @@ Seeded keys: `activation_fee_tier1_usd` 500, `activation_fee_tier2_usd` 1500, `i
 | `updated_at` | timestamptz | NOT NULL DEFAULT now(), trigger | Last update timestamp | ✅ |
 
 **Indexes**: `billing_credits_org_open_idx` ON `billing_credits(organization_id)` WHERE `remaining_usd > 0`
+
+---
+
+### billing_web_trial_operations
+
+**Writer**: service-role-only web trial RPCs (384). **Reader**: backoffice/service_role.
+Receipts commit with trial dates and credits and prevent a lost response from duplicating a mutation or audit.
+
+| Column | Type | Constraints | Description |
+| --- | --- | --- | --- |
+| `operation_id` | uuid | PK | Caller-generated mutation UUID, reused for transport retries |
+| `organization_id` | text | NOT NULL, FK organization ON DELETE CASCADE | Trial owner |
+| `action` | text | NOT NULL, CHECK start/end | One receipt per org and action, enforced by UNIQUE |
+| `actor` | text | NOT NULL | Staff actor; a replay must match |
+| `result` | jsonb | NOT NULL | Original RPC result, including trial dates and affected credits |
+| `created_at` | timestamptz | NOT NULL DEFAULT now() | Receipt creation |
+
+RLS is enabled. PUBLIC/anon/authenticated have no access; service_role has SELECT only.
+`start_billing_web_trial` and `end_billing_web_trial` perform writes under SECURITY DEFINER with the same organization lock.
+Each action attempts its existing backoffice audit once; audit failure never aborts the trial transaction.
 
 ---
 
