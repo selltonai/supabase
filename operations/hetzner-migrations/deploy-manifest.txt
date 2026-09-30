@@ -43,3 +43,5 @@ migrations/next-release/383_claim-failed-sequence-action-retries.sql
 migrations/next-release/382_billing-model.sql
 migrations/next-release/384_billing-web-trial-transactions.sql
 migrations/release_1.4.0/371_billing-start-anchor.sql
+migrations/next-release/385_tasks-completed-sort-index.sql
+migrations/next-release/386_task-stats-counts-rpc.sql
