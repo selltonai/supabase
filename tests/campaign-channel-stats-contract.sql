@@ -3,7 +3,8 @@
 INSERT INTO public.campaigns VALUES
   ('00000000-0000-0000-0000-000000005001', 'org_s', 'u_s'),
   ('00000000-0000-0000-0000-000000005002', 'org_s', 'u_s'),
-  ('00000000-0000-0000-0000-000000005003', 'org_x', 'u_x');
+  ('00000000-0000-0000-0000-000000005003', 'org_x', 'u_x'),
+  ('00000000-0000-0000-0000-000000005004', 'org_s', 'u_s');
 
 -- Email on s1. K: one email recorded twice (campaign_emails and its task, same message id) plus a second email.
 INSERT INTO public.campaign_emails (organization_id, campaign_id, contact_id, status, sent_at, message_id) VALUES
@@ -35,10 +36,12 @@ INSERT INTO public.linkedin_action_log (organization_id, campaign_id, action_typ
   ('org_s', '00000000-0000-0000-0000-000000005001', 'profile_view', true, 'urn:z', 'urn:z'),
   ('org_x', '00000000-0000-0000-0000-000000005003', 'invitation', true, 'urn:x', 'urn:x');
 -- Accepted: K and M connected now, L only invited.
-INSERT INTO public.campaign_contacts (campaign_id, contact_id, organization_id, linkedin_account_id, relation_state) VALUES
-  ('00000000-0000-0000-0000-000000005001', '00000000-0000-0000-0000-00000000500a', 'org_s', '00000000-0000-0000-0000-0000000a0001', 'connected'),
-  ('00000000-0000-0000-0000-000000005001', '00000000-0000-0000-0000-00000000500b', 'org_s', '00000000-0000-0000-0000-0000000a0001', 'invited'),
-  ('00000000-0000-0000-0000-000000005001', '00000000-0000-0000-0000-00000000500c', 'org_s', '00000000-0000-0000-0000-0000000a0001', 'connected');
+INSERT INTO public.campaign_contacts (campaign_id, contact_id, organization_id, linkedin_account_id, relation_state, created_at) VALUES
+  ('00000000-0000-0000-0000-000000005001', '00000000-0000-0000-0000-00000000500a', 'org_s', '00000000-0000-0000-0000-0000000a0001', 'connected', '2026-09-01'),
+  ('00000000-0000-0000-0000-000000005001', '00000000-0000-0000-0000-00000000500b', 'org_s', '00000000-0000-0000-0000-0000000a0001', 'invited', '2026-09-01'),
+  ('00000000-0000-0000-0000-000000005001', '00000000-0000-0000-0000-00000000500c', 'org_s', '00000000-0000-0000-0000-0000000a0001', 'connected', '2026-09-01'),
+  -- R re-enrolled on 09-25; its only reply (an untagged thread) is from 09-10, before -> not a reply for s1.
+  ('00000000-0000-0000-0000-000000005001', '00000000-0000-0000-0000-00000000500f', 'org_s', '00000000-0000-0000-0000-0000000a0001', 'connected', '2026-09-25');
 -- Threads: K's carries the campaign (two replies, one person); M's is linked through its campaign contact on the same
 -- account; a personal (unrelated_inbound) thread never counts even with the campaign on it; L on another LinkedIn
 -- account is not this campaign's thread.
@@ -47,24 +50,29 @@ INSERT INTO public.linkedin_threads (organization_id, owner_user_id, contact_id,
   ('org_s', 'u_s', '00000000-0000-0000-0000-00000000500c', NULL, 'sm', 'urn:m', 'campaign_inbound', '00000000-0000-0000-0000-0000000a0001'),
   ('org_s', 'u_s', '00000000-0000-0000-0000-00000000500e', '00000000-0000-0000-0000-000000005001', 'sp', 'urn:e', 'unrelated_inbound', '00000000-0000-0000-0000-0000000a0001'),
   ('org_s', 'u_s', '00000000-0000-0000-0000-00000000500b', NULL, 'sq', 'urn:l', 'sellton_outbound', '00000000-0000-0000-0000-0000000a0002'),
-  ('org_s', 'u_s', '00000000-0000-0000-0000-00000000500b', '00000000-0000-0000-0000-000000005001', 'sl', 'urn:l', 'sellton_outbound', '00000000-0000-0000-0000-0000000a0001');
+  ('org_s', 'u_s', '00000000-0000-0000-0000-00000000500b', '00000000-0000-0000-0000-000000005001', 'sl', 'urn:l', 'sellton_outbound', '00000000-0000-0000-0000-0000000a0001'),
+  ('org_s', 'u_s', '00000000-0000-0000-0000-00000000500f', NULL, 'sr', 'urn:r', 'sellton_outbound', '00000000-0000-0000-0000-0000000a0001'),
+  -- L replied on a thread tagged with s4: a reply for s4 only, although L is also enrolled on s1 (same account).
+  ('org_s', 'u_s', '00000000-0000-0000-0000-00000000500b', '00000000-0000-0000-0000-000000005004', 's4', 'urn:l', 'sellton_outbound', '00000000-0000-0000-0000-0000000a0001');
 INSERT INTO public.linkedin_messages (organization_id, unipile_chat_id, direction, occurred_at) VALUES
   ('org_s', 'sk', 'outbound', '2026-09-20'), ('org_s', 'sk', 'inbound', '2026-09-21'), ('org_s', 'sk', 'inbound', '2026-09-22'),
   ('org_s', 'sm', 'inbound', '2026-09-21'),
   ('org_s', 'sp', 'inbound', '2026-09-21'),
   ('org_s', 'sq', 'inbound', '2026-09-21'),
-  ('org_s', 'sl', 'outbound', '2026-09-21');
+  ('org_s', 'sl', 'outbound', '2026-09-21'),
+  ('org_s', 'sr', 'inbound', '2026-09-10'),
+  ('org_s', 's4', 'inbound', '2026-09-22');
 
 DO $$
 DECLARE r record; n int;
 BEGIN
   SELECT * INTO r FROM public.campaign_channel_stats_v1('org_s', ARRAY['00000000-0000-0000-0000-000000005001']::uuid[]);
-  IF (r.email_sent, r.email_people_reached, r.email_people_replied) IS DISTINCT FROM (3::bigint, 2::bigint, 2::bigint) THEN
-    RAISE EXCEPTION 'email: got % % %, want 3 2 2 (m1,m2,m3 / K,L / K,N)', r.email_sent, r.email_people_reached, r.email_people_replied;
+  IF (r.email_sent, r.email_people_reached, r.email_people_replied) IS DISTINCT FROM (3::bigint, 2::bigint, 1::bigint) THEN
+    RAISE EXCEPTION 'email: got % % %, want 3 2 1 (m1,m2,m3 / K,L / K; N was never reached)', r.email_sent, r.email_people_reached, r.email_people_replied;
   END IF;
   IF (r.linkedin_people_invited, r.linkedin_people_accepted, r.linkedin_people_messaged, r.linkedin_people_replied)
-     IS DISTINCT FROM (2::bigint, 2::bigint, 1::bigint, 2::bigint) THEN
-    RAISE EXCEPTION 'linkedin: got % % % %, want 2 2 1 2 (k,m / K,M / k / K,M)',
+     IS DISTINCT FROM (2::bigint, 3::bigint, 1::bigint, 2::bigint) THEN
+    RAISE EXCEPTION 'linkedin: got % % % %, want 2 3 1 2 (k,m / K,M,R / k / K,M)',
       r.linkedin_people_invited, r.linkedin_people_accepted, r.linkedin_people_messaged, r.linkedin_people_replied;
   END IF;
   -- An idle campaign is a row of zeros; another org's campaign and unknown ids are not returned.
@@ -77,6 +85,8 @@ BEGIN
       r.linkedin_people_messaged, r.linkedin_people_replied) IS DISTINCT FROM (0::bigint, 0::bigint, 0::bigint, 0::bigint, 0::bigint, 0::bigint, 0::bigint) THEN
     RAISE EXCEPTION 'idle campaign must be zeros';
   END IF;
+  SELECT * INTO r FROM public.campaign_channel_stats_v1('org_s', ARRAY['00000000-0000-0000-0000-000000005004']::uuid[]);
+  IF r.linkedin_people_replied <> 1 THEN RAISE EXCEPTION 's4 tagged thread: got %, want 1 (L)', r.linkedin_people_replied; END IF;
   IF (SELECT count(*) FROM public.campaign_channel_stats_v1('org_s', ARRAY[]::uuid[])) <> 0 THEN
     RAISE EXCEPTION 'no ids, no rows';
   END IF;

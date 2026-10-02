@@ -26,8 +26,15 @@
 --   "Just me" (p_user_id): email = campaigns I own (campaigns.user_id), LinkedIn = threads on my seat
 --     (linkedin_threads.owner_user_id), as the dashboard scopes today.
 --
--- Performance: org-scoped through existing indexes (idx_tasks_dashboard_email_sent_rollup, email_reply_events
--- org+received, linkedin_threads org, linkedin_messages chat). STABLE, SECURITY INVOKER, service_role only.
+-- Performance: every person is grouped once (no per-person subquery), and threads are attached to campaigns with
+-- equality joins. Indexes used: idx_tasks_dashboard_email_sent_rollup (the enum comparison below matches its partial
+-- predicate), idx_email_reply_events_org_received / _org_campaign_received, idx_linkedin_threads_org_recent /
+-- _campaign / _contact, idx_linkedin_messages_chat, the linkedin_action_log campaign index (269),
+-- idx_campaign_contacts_contact_id. STABLE, SECURITY INVOKER, service_role only. Measured by the review on a
+-- synthetic org (200k emails, 200k tasks, 50k threads, 300k messages).
+--
+-- Rollback: DROP FUNCTION IF EXISTS public.dashboard_people_reply_rollup_v1(text, timestamptz, timestamptz, text);
+--           DROP FUNCTION IF EXISTS public.campaign_channel_stats_v1(text, uuid[]);
 -- ============================================================
 
 -- 1. Dashboard: people reached and replied, per channel, in one window.
@@ -73,12 +80,13 @@ AS $$
     SELECT t.contact_id, t.sent_at
     FROM public.tasks t
     WHERE t.organization_id = p_org_id
-      AND t.task_type::text = 'review_draft'
+      AND t.task_type = 'review_draft'
       AND t.send_status = 'sent_success'
       AND t.sent_at IS NOT NULL
       AND t.sent_at >= p_start
       AND t.sent_at < p_end
       AND t.contact_id IS NOT NULL
+      AND t.campaign_id IS NOT NULL
       AND t.campaign_id IN (SELECT id FROM scoped_campaigns)
       AND LOWER(BTRIM(COALESCE(t.metadata->>'email_type', t.metadata->>'emailType', t.metadata->>'type',
                                t.metadata->>'reply_type', t.metadata->>'replyType', ''))) <> ALL(ARRAY[
@@ -89,7 +97,7 @@ AS $$
     SELECT contact_id, MIN(sent_at) AS first_sent_at FROM email_sends GROUP BY contact_id
   ),
   email_replies AS (
-    SELECT e.contact_id, e.received_at
+    SELECT e.contact_id, MAX(e.received_at) AS last_reply_at
     FROM public.email_reply_events e
     WHERE e.organization_id = p_org_id
       AND e.contact_id IS NOT NULL
@@ -97,6 +105,7 @@ AS $$
       -- Every counted reply is inside the window (the rate's replies follow a first send that is inside it too).
       AND e.received_at >= p_start
       AND e.received_at < p_end
+    GROUP BY e.contact_id
   ),
   li_threads AS (
     SELECT th.unipile_chat_id,
@@ -116,24 +125,29 @@ AS $$
     WHERE m.occurred_at >= p_start
       AND m.occurred_at < p_end
   ),
-  li_reached AS (
-    SELECT person, MIN(occurred_at) AS first_sent_at
+  li_people AS (
+    SELECT person,
+           MIN(occurred_at) FILTER (WHERE direction = 'outbound') AS first_sent_at,
+           MAX(occurred_at) FILTER (WHERE direction = 'inbound') AS last_reply_at
     FROM li_messages
-    WHERE direction = 'outbound'
     GROUP BY person
+  ),
+  email_people AS (
+    SELECT COALESCE(r.contact_id, e.contact_id) AS contact_id, r.first_sent_at, e.last_reply_at
+    FROM email_reached r
+    FULL JOIN email_replies e ON e.contact_id = r.contact_id
   )
   SELECT 'email'::text,
-    (SELECT count(*) FROM email_reached),
-    (SELECT count(DISTINCT contact_id) FROM email_replies),
-    (SELECT count(*) FROM email_reached r
-      WHERE EXISTS (SELECT 1 FROM email_replies e WHERE e.contact_id = r.contact_id AND e.received_at >= r.first_sent_at))
+    count(*) FILTER (WHERE first_sent_at IS NOT NULL),
+    count(*) FILTER (WHERE last_reply_at IS NOT NULL),
+    count(*) FILTER (WHERE first_sent_at IS NOT NULL AND last_reply_at >= first_sent_at)
+  FROM email_people
   UNION ALL
   SELECT 'linkedin'::text,
-    (SELECT count(*) FROM li_reached),
-    (SELECT count(DISTINCT person) FROM li_messages WHERE direction = 'inbound'),
-    (SELECT count(*) FROM li_reached r
-      WHERE EXISTS (SELECT 1 FROM li_messages m
-                    WHERE m.person = r.person AND m.direction = 'inbound' AND m.occurred_at >= r.first_sent_at))
+    count(*) FILTER (WHERE first_sent_at IS NOT NULL),
+    count(*) FILTER (WHERE last_reply_at IS NOT NULL),
+    count(*) FILTER (WHERE first_sent_at IS NOT NULL AND last_reply_at >= first_sent_at)
+  FROM li_people
 $$;
 
 REVOKE ALL ON FUNCTION public.dashboard_people_reply_rollup_v1(text, timestamptz, timestamptz, text) FROM PUBLIC, anon, authenticated;
@@ -146,12 +160,14 @@ COMMENT ON FUNCTION public.dashboard_people_reply_rollup_v1(text, timestamptz, t
 --    and unknown ids are not returned; a campaign with no activity returns zeros.
 --    email_sent                outreach emails sent, de-duplicated like 359 (message id, then thread, then contact)
 --    email_people_reached      distinct contacts sent outreach
---    email_people_replied      distinct contacts with a reply event on the campaign
+--    email_people_replied      of those reached, contacts with a reply event on the campaign (never above reached)
 --    linkedin_people_invited   distinct people with a successful invitation on the campaign (linkedin_action_log)
 --    linkedin_people_accepted  campaign contacts whose relation is connected now (as the list shows today)
 --    linkedin_people_messaged  distinct people with a successful message on the campaign
 --    linkedin_people_replied   distinct people with an inbound message on a counted thread of the campaign: the thread
---                              carries the campaign, or its contact is a campaign contact on the same LinkedIn account
+--                              carries the campaign, or (untagged) its contact is enrolled on the same LinkedIn account
+--                              and replied after enrolling. Can exceed messaged: campaign_inbound people write first.
+--    Known limit: a person seen once with a contact and once only by provider id counts as two.
 CREATE OR REPLACE FUNCTION public.campaign_channel_stats_v1(
   p_org_id text,
   p_campaign_ids uuid[]
@@ -174,12 +190,15 @@ AS $$
     WHERE c.organization_id = p_org_id AND c.id = ANY(p_campaign_ids)
   ),
   email_sends AS (
+    -- The dedup keys are 359's, character for character.
     SELECT ce.campaign_id, ce.contact_id,
       CASE
         WHEN ce.message_id IS NOT NULL AND ce.message_id <> '' THEN 'message:' || ce.message_id
-        WHEN ce.thread_id IS NOT NULL AND ce.thread_id <> '' THEN
-          'thread-sent:' || ce.campaign_id::text || ':' || ce.contact_id::text || ':' || ce.thread_id || ':' || COALESCE(ce.sent_at, ce.created_at)::text
-        ELSE 'campaign-contact-sent:' || ce.campaign_id::text || ':' || ce.contact_id::text || ':' || COALESCE(ce.sent_at, ce.created_at)::text
+        WHEN ce.thread_id IS NOT NULL AND ce.thread_id <> '' AND ce.sent_at IS NOT NULL THEN
+          'thread-sent:' || ce.campaign_id::text || ':' || ce.contact_id::text || ':' || ce.thread_id || ':' || ce.sent_at::text
+        WHEN ce.sent_at IS NOT NULL THEN
+          'campaign-contact-sent:' || ce.campaign_id::text || ':' || ce.contact_id::text || ':' || ce.sent_at::text
+        ELSE 'campaign-email:' || ce.id::text
       END AS dedup_key
     FROM public.campaign_emails ce
     WHERE ce.organization_id = p_org_id
@@ -200,10 +219,11 @@ AS $$
       END
     FROM public.tasks t
     WHERE t.organization_id = p_org_id
-      AND t.task_type::text = 'review_draft'
+      AND t.task_type = 'review_draft'
       AND t.send_status = 'sent_success'
       AND t.sent_at IS NOT NULL
       AND t.contact_id IS NOT NULL
+      AND t.campaign_id IS NOT NULL
       AND t.campaign_id IN (SELECT id FROM wanted)
       AND LOWER(BTRIM(COALESCE(t.metadata->>'email_type', t.metadata->>'emailType', t.metadata->>'type',
                                t.metadata->>'reply_type', t.metadata->>'replyType', ''))) <> ALL(ARRAY[
@@ -214,13 +234,20 @@ AS $$
     SELECT s.campaign_id, count(DISTINCT s.dedup_key) AS sent, count(DISTINCT s.contact_id) AS reached
     FROM email_sends s GROUP BY s.campaign_id
   ),
+  email_reached AS (
+    SELECT DISTINCT s.campaign_id, s.contact_id FROM email_sends s
+  ),
+  -- Replied = reached people with a reply event on the campaign, so the list's rate never passes 100%.
   email_replied AS (
-    SELECT e.campaign_id, count(DISTINCT e.contact_id) AS replied
-    FROM public.email_reply_events e
-    WHERE e.organization_id = p_org_id
-      AND e.campaign_id IN (SELECT id FROM wanted)
-      AND e.contact_id IS NOT NULL
-    GROUP BY e.campaign_id
+    SELECT r.campaign_id, count(*) AS replied
+    FROM email_reached r
+    WHERE EXISTS (
+      SELECT 1 FROM public.email_reply_events e
+      WHERE e.organization_id = p_org_id
+        AND e.campaign_id = r.campaign_id
+        AND e.contact_id = r.contact_id
+    )
+    GROUP BY r.campaign_id
   ),
   li_sends AS (
     SELECT a.campaign_id,
@@ -242,34 +269,40 @@ AS $$
       AND cc.relation_state = 'connected'
     GROUP BY cc.campaign_id
   ),
-  li_threads AS (
-    SELECT w.id AS campaign_id, th.unipile_chat_id,
-           COALESCE(th.contact_id::text, 'li:' || th.counterpart_provider_id) AS person
-    FROM wanted w
-    JOIN public.linkedin_threads th
-      ON th.organization_id = p_org_id
-     AND th.thread_origin IN ('sellton_outbound', 'campaign_inbound')
-     AND (th.contact_id IS NOT NULL OR th.counterpart_provider_id IS NOT NULL)
-     AND (
-       th.campaign_id = w.id
-       OR EXISTS (
-         SELECT 1 FROM public.campaign_contacts cc
-         WHERE cc.campaign_id = w.id
-           AND cc.contact_id = th.contact_id
-           AND cc.linkedin_account_id IS NOT DISTINCT FROM th.linkedin_account_id
-       )
-     )
+  -- Threads with a reply, found once: counted origin, a person, and the time of the last inbound message.
+  replied_threads AS (
+    SELECT th.campaign_id, th.contact_id, th.linkedin_account_id,
+           COALESCE(th.contact_id::text, 'li:' || th.counterpart_provider_id) AS person,
+           MAX(m.occurred_at) AS last_reply_at
+    FROM public.linkedin_threads th
+    JOIN public.linkedin_messages m
+      ON m.unipile_chat_id = th.unipile_chat_id
+     AND m.organization_id = p_org_id
+     AND m.direction = 'inbound'
+    WHERE th.organization_id = p_org_id
+      AND th.thread_origin IN ('sellton_outbound', 'campaign_inbound')
+      AND (th.contact_id IS NOT NULL OR th.counterpart_provider_id IS NOT NULL)
+    GROUP BY th.campaign_id, th.contact_id, th.linkedin_account_id, th.counterpart_provider_id
   ),
+  -- A thread belongs to the campaign it carries; an untagged thread belongs to the campaigns its contact is enrolled
+  -- in on the same LinkedIn account, for replies after that enrolment (a re-enrolment does not inherit old replies).
   li_replied AS (
-    SELECT t.campaign_id, count(DISTINCT t.person) AS replied
-    FROM li_threads t
-    WHERE EXISTS (
-      SELECT 1 FROM public.linkedin_messages m
-      WHERE m.unipile_chat_id = t.unipile_chat_id
-        AND m.organization_id = p_org_id
-        AND m.direction = 'inbound'
-    )
-    GROUP BY t.campaign_id
+    SELECT campaign_id, count(DISTINCT person) AS replied
+    FROM (
+      SELECT rt.campaign_id, rt.person
+      FROM replied_threads rt
+      WHERE rt.campaign_id IN (SELECT id FROM wanted)
+      UNION
+      SELECT cc.campaign_id, rt.person
+      FROM replied_threads rt
+      JOIN public.campaign_contacts cc
+        ON cc.contact_id = rt.contact_id
+       AND cc.linkedin_account_id IS NOT DISTINCT FROM rt.linkedin_account_id
+       AND cc.campaign_id IN (SELECT id FROM wanted)
+       AND rt.last_reply_at >= cc.created_at
+      WHERE rt.campaign_id IS NULL
+    ) attached
+    GROUP BY campaign_id
   )
   SELECT w.id,
     COALESCE(e.sent, 0), COALESCE(e.reached, 0), COALESCE(er.replied, 0),

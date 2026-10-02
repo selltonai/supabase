@@ -31,7 +31,7 @@ CREATE TABLE public.linkedin_messages (
 );
 CREATE TABLE public.campaign_contacts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), campaign_id uuid NOT NULL, contact_id uuid NOT NULL, organization_id text,
-  linkedin_account_id uuid, relation_state text, UNIQUE (campaign_id, contact_id)
+  linkedin_account_id uuid, relation_state text, created_at timestamptz NOT NULL DEFAULT now(), UNIQUE (campaign_id, contact_id)
 );
 CREATE TABLE public.linkedin_action_log (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), organization_id text NOT NULL, campaign_id uuid, action_type text NOT NULL,

@@ -42,6 +42,14 @@ INSERT INTO public.email_reply_events (organization_id, contact_id, campaign_id,
   ('org_a', '00000000-0000-0000-0000-000000000012', '00000000-0000-0000-0000-0000000000c1', '2026-09-26');
 INSERT INTO public.campaign_emails (organization_id, campaign_id, contact_id, status, sent_at) VALUES
   ('org_a', '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-000000000012', 'sent', '2026-09-28');
+-- I: a sent-like status without sent_at, created inside the window -> reached.
+INSERT INTO public.campaign_emails (organization_id, campaign_id, contact_id, status, sent_at, created_at) VALUES
+  ('org_a', '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-000000000013', 'delivered', NULL, '2026-09-27');
+-- J: a reply-type task send -> not outreach. Q: sent exactly at the window's end -> outside it.
+INSERT INTO public.tasks (organization_id, task_type, send_status, sent_at, campaign_id, contact_id, metadata) VALUES
+  ('org_a', 'review_draft', 'sent_success', '2026-09-26', '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-000000000014', '{"reply_type":"timeslots"}');
+INSERT INTO public.campaign_emails (organization_id, campaign_id, contact_id, status, sent_at) VALUES
+  ('org_a', '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-000000000015', 'sent', '2026-10-01');
 -- G: a draft never sent -> not reached. Other org: never counted.
 INSERT INTO public.campaign_emails (organization_id, campaign_id, contact_id, status, sent_at) VALUES
   ('org_a', '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-000000000010', 'draft', NULL),
@@ -52,7 +60,8 @@ INSERT INTO public.linkedin_threads (organization_id, owner_user_id, contact_id,
   ('org_a', 'u_me', '00000000-0000-0000-0000-0000000000a1', 'chat1', 'urn:1', 'sellton_outbound'),
   ('org_a', 'u_me', '00000000-0000-0000-0000-0000000000a1', 'chat4', 'urn:1', 'sellton_outbound'),
   ('org_a', 'u_other', NULL, 'chat2', 'urn:2', 'campaign_inbound'),
-  ('org_a', 'u_me', NULL, 'chat3', 'urn:3', 'personal'),
+  ('org_a', 'u_me', NULL, 'chat3', 'urn:3', 'unrelated_inbound'),
+  ('org_a', 'u_me', NULL, 'chat6', 'urn:6', 'sellton_outbound'),
   ('org_a', 'u_me', NULL, 'chat5', 'urn:5', 'sellton_outbound'),
   ('org_b', 'u_me', NULL, 'chat9', 'urn:9', 'sellton_outbound');
 INSERT INTO public.linkedin_messages (organization_id, unipile_chat_id, direction, occurred_at) VALUES
@@ -65,15 +74,17 @@ INSERT INTO public.linkedin_messages (organization_id, unipile_chat_id, directio
   ('org_a', 'chat3', 'outbound', '2026-09-25'), ('org_a', 'chat3', 'inbound', '2026-09-26'),
   -- urn:5 messaged before the window, replied inside it: a reply, not reached in the window.
   ('org_a', 'chat5', 'outbound', '2026-09-01'), ('org_a', 'chat5', 'inbound', '2026-09-27'),
-  ('org_b', 'chat9', 'outbound', '2026-09-25'), ('org_b', 'chat9', 'inbound', '2026-09-26');
+  ('org_b', 'chat9', 'outbound', '2026-09-25'), ('org_b', 'chat9', 'inbound', '2026-09-26'),
+  -- urn:6 is messaged exactly at the window's end: outside it.
+  ('org_a', 'chat6', 'outbound', '2026-10-01');
 
 DO $$
 DECLARE r record;
 BEGIN
   -- Whole team.
   SELECT * INTO r FROM public.dashboard_people_reply_rollup_v1('org_a', '2026-09-24', '2026-10-01') WHERE channel = 'email';
-  IF (r.people_reached, r.people_replied, r.reached_and_replied) IS DISTINCT FROM (5::bigint, 4::bigint, 2::bigint) THEN
-    RAISE EXCEPTION 'email team: got % % %, want 5 4 2 (A,B,E,F,H / A,B,D,H / A,B)', r.people_reached, r.people_replied, r.reached_and_replied;
+  IF (r.people_reached, r.people_replied, r.reached_and_replied) IS DISTINCT FROM (6::bigint, 4::bigint, 2::bigint) THEN
+    RAISE EXCEPTION 'email team: got % % %, want 6 4 2 (A,B,E,F,H,I / A,B,D,H / A,B)', r.people_reached, r.people_replied, r.reached_and_replied;
   END IF;
   SELECT * INTO r FROM public.dashboard_people_reply_rollup_v1('org_a', '2026-09-24', '2026-10-01') WHERE channel = 'linkedin';
   IF (r.people_reached, r.people_replied, r.reached_and_replied) IS DISTINCT FROM (2::bigint, 3::bigint, 1::bigint) THEN
@@ -81,8 +92,8 @@ BEGIN
   END IF;
   -- Just me.
   SELECT * INTO r FROM public.dashboard_people_reply_rollup_v1('org_a', '2026-09-24', '2026-10-01', 'u_me') WHERE channel = 'email';
-  IF (r.people_reached, r.people_replied, r.reached_and_replied) IS DISTINCT FROM (4::bigint, 3::bigint, 1::bigint) THEN
-    RAISE EXCEPTION 'email mine: got % % %, want 4 3 1 (A,E,F,H / A,D,H / A)', r.people_reached, r.people_replied, r.reached_and_replied;
+  IF (r.people_reached, r.people_replied, r.reached_and_replied) IS DISTINCT FROM (5::bigint, 3::bigint, 1::bigint) THEN
+    RAISE EXCEPTION 'email mine: got % % %, want 5 3 1 (A,E,F,H,I / A,D,H / A)', r.people_reached, r.people_replied, r.reached_and_replied;
   END IF;
   SELECT * INTO r FROM public.dashboard_people_reply_rollup_v1('org_a', '2026-09-24', '2026-10-01', 'u_me') WHERE channel = 'linkedin';
   IF (r.people_reached, r.people_replied, r.reached_and_replied) IS DISTINCT FROM (1::bigint, 2::bigint, 1::bigint) THEN
