@@ -6,6 +6,10 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN CREATE ROLE authenticated; END IF;
 END $$;
 
+-- As on the Supabase image: functions created in public are granted to anon and authenticated by default, so a
+-- migration must revoke them explicitly. Without this line the contract's grant check would prove nothing.
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon, authenticated, service_role;
+
 CREATE TABLE public.usage (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id text NOT NULL,

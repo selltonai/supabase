@@ -24,6 +24,8 @@ BEGIN
   IF public.usage_display_category('tokens', NULL) <> 'research' THEN RAISE EXCEPTION 'a NULL service is research'; END IF;
   IF public.usage_display_category('phones', 'email_generation') <> 'phone_numbers' THEN RAISE EXCEPTION 'phones'; END IF;
   IF public.usage_display_category('b2b_data', NULL) <> 'company_data' THEN RAISE EXCEPTION 'b2b_data'; END IF;
+  -- The onboarding interview (provider retell, which 345 files under b2b_data) is Research, by D10.
+  IF public.usage_display_category('b2b_data', 'retell') <> 'research' THEN RAISE EXCEPTION 'retell is research'; END IF;
 
   -- No thirteenth Writing service slips in: count the quoted names in the IN list of the function body.
   SELECT prosrc INTO body FROM pg_proc WHERE oid = 'public.usage_display_category(text, text)'::regprocedure;
@@ -45,6 +47,10 @@ BEGIN
   IF has_function_privilege('anon', 'public.analytics_usage_rollup_v4(text, timestamptz, timestamptz, text, text, text)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public.analytics_usage_rollup_v4(text, timestamptz, timestamptz, text, text, text)', 'EXECUTE') THEN
     RAISE EXCEPTION 'v4 must be service_role only';
+  END IF;
+  IF has_function_privilege('anon', 'public.usage_display_category(text, text)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.usage_display_category(text, text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'usage_display_category must be service_role only';
   END IF;
   IF NOT has_function_privilege('service_role', 'public.analytics_usage_rollup_v4(text, timestamptz, timestamptz, text, text, text)', 'EXECUTE') THEN
     RAISE EXCEPTION 'service_role must be able to call v4';
@@ -80,6 +86,18 @@ VALUES
   ('org-a', 's6', 'unipile',   NULL,           5, 0, 0, 0, 'user-1', 'camp-1', '2026-07-02T12:00:00Z', '{"service":"linkedin_sync"}', 0, 0),
   -- Phone numbers: 3.000000 with 1 phone found.
   ('org-a', 's7', 'airscale',  'airscale-phone-finder', 1, 0, 0, 0, 'user-2', 'camp-2', '2026-07-02T12:45:00Z', '{"action":"phone_finder","phones_found":1}', 0.3, 3.000000),
+  -- Writing at $0 (pricing missed): stays, with its 50 tokens.
+  ('org-a', 's11', 'openai',   'gpt-4.1-mini', 1, 20, 30, 50, 'user-1', 'camp-1', '2026-07-03T09:00:00Z', '{"service":"email_generation"}', 0, 0),
+  -- Company data that cost Sellton nothing but has an original cost: stays.
+  ('org-a', 's12', 'hunter',   'email-finder', 1, 0, 0, 0, 'user-1', 'camp-1', '2026-07-03T09:30:00Z', '{"service":"cost_split"}', 0.05, 0),
+  -- Company data with tokens and no cost (an unlisted LLM provider): stays, so tokens still equal v3's.
+  ('org-a', 's13', 'google',   'gemma',        1, 400, 100, 500, 'user-2', 'camp-2', '2026-07-03T10:00:00Z', '{"service":"misc"}', 0, 0),
+  -- The onboarding interview: Research, 0.700000.
+  ('org-a', 's14', 'retell',   NULL,           1, 0, 0, 0, 'user-2', 'camp-2', '2026-07-03T11:00:00Z', '{"service":"retell"}', 0.7, 0.700000),
+  -- Research at $0 with no tokens (a cached call): not infrastructure, so it stays and its call counts.
+  ('org-a', 's16', 'openai',   'gpt-4.1-mini', 1, 0, 0, 0, 'user-1', NULL, '2026-07-03T12:30:00Z', '{"service":"company_research"}', 0, 0),
+  -- Exactly at the window's end (v3 includes p_end): Writing, 0.010000.
+  ('org-a', 's15', 'openai',   'gpt-4.1-mini', 1, 2, 3, 5, 'user-1', 'camp-1', '2026-07-04T00:00:00Z', '{"service":"email_generation"}', 0.001, 0.010000),
   -- Another organization: never counted.
   ('org-b', 's8', 'openai',    'gpt-4.1-mini', 1, 999, 1, 1000, 'user-9', 'camp-9', '2026-07-01T10:15:00Z', '{"service":"email_generation"}', 9.9, 99.000000);
 
@@ -90,23 +108,41 @@ DECLARE
   v4_total numeric;
   r record;
 BEGIN
-  -- 5a. Whole days (projection rows): four categories, the $0 row hidden with its 5 calls, exact costs and counts.
+  -- 5a. Whole days plus the row at p_end: four categories, the $0 infrastructure row hidden with its 5 calls.
   SELECT jsonb_object_agg(display_category, jsonb_build_object('cost', sellton_cost, 'tokens', total_tokens, 'emails', emails_found, 'phones', phones_found, 'calls', api_calls))
     INTO got
     FROM public.analytics_usage_rollup_v4('org-a', '2026-07-01T00:00:00Z', '2026-07-04T00:00:00Z');
   IF got <> '{
-      "writing":       {"cost": 1.500000, "tokens": 130, "emails": 0, "phones": 0, "calls": 2},
-      "research":      {"cost": 0.375000, "tokens": 110, "emails": 0, "phones": 0, "calls": 3},
-      "company_data":  {"cost": 2.000000, "tokens": 0,   "emails": 2, "phones": 0, "calls": 2},
+      "writing":       {"cost": 1.510000, "tokens": 185, "emails": 0, "phones": 0, "calls": 4},
+      "research":      {"cost": 1.075000, "tokens": 110, "emails": 0, "phones": 0, "calls": 5},
+      "company_data":  {"cost": 2.000000, "tokens": 500, "emails": 2, "phones": 0, "calls": 4},
       "phone_numbers": {"cost": 3.000000, "tokens": 0,   "emails": 0, "phones": 1, "calls": 1}
     }'::jsonb THEN
     RAISE EXCEPTION 'whole-day totals: %', got;
   END IF;
 
-  -- 5b. The four costs equal v3's total for the same window (the hidden rows cost 0).
+  -- 5b. Cost and tokens equal v3's for the same window (a hidden group has neither). Borce's acceptance check.
   SELECT ROUND(SUM(sellton_cost), 6) INTO v3_total FROM public.analytics_usage_rollup_v3('org-a', '2026-07-01T00:00:00Z', '2026-07-04T00:00:00Z', 'total');
   SELECT ROUND(SUM(sellton_cost), 6) INTO v4_total FROM public.analytics_usage_rollup_v4('org-a', '2026-07-01T00:00:00Z', '2026-07-04T00:00:00Z');
-  IF v3_total IS DISTINCT FROM v4_total OR v4_total <> 6.875000 THEN RAISE EXCEPTION 'v3 % vs v4 %', v3_total, v4_total; END IF;
+  IF v3_total IS DISTINCT FROM v4_total OR v4_total <> 7.585000 THEN RAISE EXCEPTION 'v3 % vs v4 %', v3_total, v4_total; END IF;
+  SELECT SUM(total_tokens) INTO v3_total FROM public.analytics_usage_rollup_v3('org-a', '2026-07-01T00:00:00Z', '2026-07-04T00:00:00Z', 'total');
+  SELECT SUM(total_tokens) INTO v4_total FROM public.analytics_usage_rollup_v4('org-a', '2026-07-01T00:00:00Z', '2026-07-04T00:00:00Z');
+  IF v3_total IS DISTINCT FROM v4_total OR v4_total <> 795 THEN RAISE EXCEPTION 'tokens: v3 % vs v4 %', v3_total, v4_total; END IF;
+
+  -- 5b2. A window mixing whole days with partial edges at both ends matches v3 in cost and tokens.
+  FOR r IN SELECT * FROM (VALUES
+      ('2026-07-01T10:00:00Z'::timestamptz, '2026-07-03T12:00:00Z'::timestamptz),
+      ('2026-07-01T10:30:00Z'::timestamptz, '2026-07-03T09:30:00Z'::timestamptz),
+      ('2026-07-03T00:00:00Z'::timestamptz, '2026-07-04T00:00:00Z'::timestamptz)) w(s, e) LOOP
+    IF (SELECT (ROUND(SUM(sellton_cost), 6), SUM(total_tokens)) FROM public.analytics_usage_rollup_v4('org-a', r.s, r.e))
+       IS DISTINCT FROM
+       (SELECT (ROUND(SUM(sellton_cost), 6), SUM(total_tokens)) FROM public.analytics_usage_rollup_v3('org-a', r.s, r.e, 'total')) THEN
+      RAISE EXCEPTION 'mixed window % - % differs from v3', r.s, r.e;
+    END IF;
+  END LOOP;
+  -- The row at exactly p_end counts (as in v3).
+  SELECT ROUND(SUM(sellton_cost), 6) INTO v4_total FROM public.analytics_usage_rollup_v4('org-a', '2026-07-03T12:00:00Z', '2026-07-04T00:00:00Z');
+  IF v4_total <> 0.010000 THEN RAISE EXCEPTION 'row at p_end: %', v4_total; END IF;
 
   -- 5c. Partial-day edges (contribution rows) count each usage row once: 10:00 on day 1 to 12:00 on day 2.
   SELECT ROUND(SUM(sellton_cost), 6) INTO v4_total FROM public.analytics_usage_rollup_v4('org-a', '2026-07-01T10:00:00Z', '2026-07-02T12:00:00Z');
@@ -116,9 +152,9 @@ BEGIN
 
   -- 5d. Day and hour buckets add up to the same total, and each bucket has at most one row per category.
   SELECT ROUND(SUM(sellton_cost), 6) INTO v4_total FROM public.analytics_usage_rollup_v4('org-a', '2026-07-01T00:00:00Z', '2026-07-04T00:00:00Z', 'day');
-  IF v4_total <> 6.875000 THEN RAISE EXCEPTION 'day buckets: %', v4_total; END IF;
+  IF v4_total <> 7.585000 THEN RAISE EXCEPTION 'day buckets: %', v4_total; END IF;
   SELECT ROUND(SUM(sellton_cost), 6) INTO v4_total FROM public.analytics_usage_rollup_v4('org-a', '2026-07-01T00:00:00Z', '2026-07-04T00:00:00Z', 'hour');
-  IF v4_total <> 6.875000 THEN RAISE EXCEPTION 'hour buckets: %', v4_total; END IF;
+  IF v4_total <> 7.585000 THEN RAISE EXCEPTION 'hour buckets: %', v4_total; END IF;
   FOR r IN SELECT bucket_start, display_category, count(*) AS n
              FROM public.analytics_usage_rollup_v4('org-a', '2026-07-01T00:00:00Z', '2026-07-04T00:00:00Z', 'day')
             GROUP BY 1, 2 HAVING count(*) > 1 LOOP
@@ -128,13 +164,13 @@ BEGIN
   -- 5e. "Just me" and one play.
   SELECT jsonb_object_agg(display_category, sellton_cost) INTO got
     FROM public.analytics_usage_rollup_v4('org-a', '2026-07-01T00:00:00Z', '2026-07-04T00:00:00Z', 'total', NULL, 'user-2');
-  IF got <> '{"writing": 0.500000, "research": 0.125000, "phone_numbers": 3.000000}'::jsonb THEN RAISE EXCEPTION 'user filter: %', got; END IF;
+  IF got <> '{"writing": 0.500000, "research": 0.825000, "company_data": 0, "phone_numbers": 3.000000}'::jsonb THEN RAISE EXCEPTION 'user filter: %', got; END IF;
   SELECT jsonb_object_agg(display_category, sellton_cost) INTO got
     FROM public.analytics_usage_rollup_v4('org-a', '2026-07-01T00:00:00Z', '2026-07-04T00:00:00Z', 'total', 'camp-1', NULL);
-  IF got <> '{"writing": 1.000000, "research": 0.125000, "company_data": 2.000000}'::jsonb THEN RAISE EXCEPTION 'campaign filter: %', got; END IF;
+  IF got <> '{"writing": 1.010000, "research": 0.125000, "company_data": 2.000000}'::jsonb THEN RAISE EXCEPTION 'campaign filter: %', got; END IF;
   SELECT jsonb_object_agg(display_category, sellton_cost) INTO got
     FROM public.analytics_usage_rollup_v4('org-a', '2026-07-01T00:00:00Z', '2026-07-04T00:00:00Z', 'total', 'all', '');
-  IF (got ->> 'writing')::numeric <> 1.5 THEN RAISE EXCEPTION '"all" and empty filters mean everything: %', got; END IF;
+  IF (got ->> 'writing')::numeric <> 1.51 THEN RAISE EXCEPTION '"all" and empty filters mean everything: %', got; END IF;
 
   -- 5f. Another organization sees only its own row; an unknown one sees nothing.
   SELECT jsonb_object_agg(display_category, sellton_cost) INTO got
@@ -144,7 +180,13 @@ BEGIN
     RAISE EXCEPTION 'unknown org returned rows';
   END IF;
 
-  -- 5g. A bad bucket is refused.
+  -- 5g. A bad or missing bucket is refused.
+  BEGIN
+    PERFORM * FROM public.analytics_usage_rollup_v4('org-a', '2026-07-01T00:00:00Z', '2026-07-04T00:00:00Z', NULL);
+    RAISE EXCEPTION 'NULL bucket accepted';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM NOT LIKE 'unsupported usage analytics bucket%' THEN RAISE; END IF;
+  END;
   BEGIN
     PERFORM * FROM public.analytics_usage_rollup_v4('org-a', '2026-07-01T00:00:00Z', '2026-07-04T00:00:00Z', 'week');
     RAISE EXCEPTION 'week bucket accepted';
@@ -154,8 +196,8 @@ BEGIN
 END $$;
 
 -- 6. The projection merges rows with the same labels in one bucket. Here a $0 row (3 calls) and a paid one (1 call)
---    share a projection row, so the aggregate is paid and stays whole: cost and counts exact, calls 4. The cost total
---    is right either way; only standalone $0 rows (5a) drop out.
+--    share a projection key, so the group is paid and stays whole: cost and counts exact, calls 4. Edges are grouped
+--    by the same key, so a window starting mid-day gives the same answer. Only $0 groups without tokens drop out.
 INSERT INTO public.usage (organization_id, session_id, provider, api_calls, user_id, created_at, metadata, original_cost, sellton_cost)
 VALUES ('org-c', 's9', 'unipile', 3, 'u', '2026-07-02T10:00:00Z', '{}', 0, 0),
        ('org-c', 's10', 'aiark', 1, 'u', '2026-07-02T10:30:00Z', '{"people_found":4}', 0.1, 0.400000);
@@ -165,6 +207,10 @@ BEGIN
   SELECT jsonb_object_agg(display_category, jsonb_build_object('cost', sellton_cost, 'people', people_found, 'calls', api_calls)) INTO got
     FROM public.analytics_usage_rollup_v4('org-c', '2026-07-01T00:00:00Z', '2026-07-04T00:00:00Z');
   IF got <> '{"company_data": {"cost": 0.400000, "people": 4, "calls": 4}}'::jsonb THEN RAISE EXCEPTION 'mixed company data: %', got; END IF;
+  -- The same rows seen through a partial edge (window from 09:00) are grouped the same way: calls stay 4.
+  SELECT jsonb_object_agg(display_category, jsonb_build_object('cost', sellton_cost, 'people', people_found, 'calls', api_calls)) INTO got
+    FROM public.analytics_usage_rollup_v4('org-c', '2026-07-02T09:00:00Z', '2026-07-04T00:00:00Z');
+  IF got <> '{"company_data": {"cost": 0.400000, "people": 4, "calls": 4}}'::jsonb THEN RAISE EXCEPTION 'edge grouping: %', got; END IF;
 END $$;
 
 ROLLBACK;

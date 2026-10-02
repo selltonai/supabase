@@ -15,11 +15,16 @@
 -- Rules (work order Addendum C, D10). 345's category already encodes the provider:
 --   phones   (the airscale phone rule)                                   -> 'phone_numbers'
 --   tokens   (an LLM provider) with service_name in the Writing list      -> 'writing'
---   tokens   with any other service_name (open-ended: sales brief, retell) -> 'research'
+--   tokens   with any other service_name (open-ended: sales brief)        -> 'research'
+--   b2b_data with service_name 'retell' (the onboarding interview: Modal writes provider 'retell', which 345 files
+--            under b2b_data, with a real cost; D10 counts it as Research)  -> 'research'
 --   b2b_data (every other provider)                                       -> 'company_data'
---   A company-data row whose cost is 0 (original and Sellton) is hidden, calls and counts included: those are $0
---   infrastructure rows (D10). A projection row is hidden only when its whole aggregate costs 0.
--- Costs are summed exactly as v3 does (ROUND(SUM(...), 6)), so the four categories add up to v3's total.
+--   A company-data group with no cost at all (original and Sellton) and no tokens is hidden, calls and counts
+--   included: those are $0 infrastructure rows (D10). A group is one projection key in one bucket (345's primary key:
+--   category, play, user, task, model, service, operation, company, run). The partial edge buckets are grouped by the
+--   same key before the rule is applied, so a window's start never changes what is hidden.
+-- Costs are summed exactly as v3 does (ROUND(SUM(...), 6)) and a hidden group has no cost and no tokens, so the
+-- four categories' cost and tokens add up to v3's for the same window (Borce's acceptance check).
 --
 -- Performance: the same reads as v3 (projection rows by organization, granularity and bucket via the primary key;
 -- edge contributions via idx_usage_analytics_projection_contributions_org_occurred), grouped into at most four
@@ -34,10 +39,10 @@ CREATE OR REPLACE FUNCTION public.usage_display_category(p_category text, p_serv
 RETURNS text
 LANGUAGE sql
 IMMUTABLE
-SET search_path = public
 AS $$
   SELECT CASE
     WHEN p_category = 'phones' THEN 'phone_numbers'
+    WHEN p_category = 'b2b_data' AND p_service_name = 'retell' THEN 'research'
     WHEN p_category = 'tokens' AND COALESCE(p_service_name, '') IN (
       'email_generation_service',
       'email_generation',
@@ -89,7 +94,7 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
-  IF p_bucket NOT IN ('hour', 'day', 'total') THEN
+  IF p_bucket IS NULL OR p_bucket NOT IN ('hour', 'day', 'total') THEN
     RAISE EXCEPTION 'unsupported usage analytics bucket %', p_bucket;
   END IF;
 
@@ -134,7 +139,8 @@ BEGIN
       AND rollup.bucket_start >= p_start
       AND rollup.bucket_start + scope.bucket_width <= p_end
   ),
-  -- Partial buckets at the window's edges come from the per-row contributions (as v3).
+  -- Partial buckets at the window's edges come from the per-row contributions (as v3), grouped by the projection's
+  -- own key so that the $0 rule below sees the same groups on an edge as on a whole bucket.
   edge_rows AS (
     SELECT
       edge.source_bucket_start,
@@ -142,17 +148,17 @@ BEGIN
       edge.service_name,
       edge.campaign_id,
       edge.user_id,
-      edge.api_calls,
-      edge.input_tokens,
-      edge.output_tokens,
-      edge.total_tokens,
-      edge.units,
-      edge.emails_found,
-      edge.people_found,
-      edge.companies_found,
-      edge.phones_found,
-      edge.original_cost,
-      edge.sellton_cost
+      SUM(edge.api_calls)::bigint,
+      SUM(edge.input_tokens)::bigint,
+      SUM(edge.output_tokens)::bigint,
+      SUM(edge.total_tokens)::bigint,
+      SUM(edge.units),
+      SUM(edge.emails_found),
+      SUM(edge.people_found),
+      SUM(edge.companies_found),
+      SUM(edge.phones_found),
+      SUM(edge.original_cost),
+      SUM(edge.sellton_cost)
     FROM (
       SELECT
         date_trunc(scope.bucket_granularity, contribution.occurred_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS source_bucket_start,
@@ -168,6 +174,10 @@ BEGIN
       edge.source_bucket_start >= p_start
       AND edge.source_bucket_start + edge.bucket_width <= p_end
     )
+    GROUP BY
+      edge.source_bucket_start, edge.category, edge.campaign_id, edge.user_id, edge.task_label, edge.model_label,
+      edge.raw_model_name, edge.service_name, edge.operation_name, edge.company_id, edge.run_id,
+      edge.metadata_research_run_id
   ),
   scoped AS (
     SELECT
@@ -184,8 +194,13 @@ BEGIN
     ) base_rows
     WHERE (NULLIF(p_campaign_id, '') IS NULL OR p_campaign_id = 'all' OR base_rows.campaign_id = p_campaign_id)
       AND (NULLIF(p_user_id, '') IS NULL OR base_rows.user_id = p_user_id)
-      -- $0 infrastructure rows (company data with no cost at all) are hidden, calls and counts included.
-      AND NOT (base_rows.category = 'b2b_data' AND base_rows.sellton_cost = 0 AND base_rows.original_cost = 0)
+      -- $0 infrastructure groups (company data with no cost at all and no tokens) are hidden, calls and counts included.
+      AND NOT (
+        public.usage_display_category(base_rows.category, base_rows.service_name) = 'company_data'
+        AND base_rows.sellton_cost = 0
+        AND base_rows.original_cost = 0
+        AND base_rows.total_tokens = 0
+      )
   )
   SELECT
     scoped.grouped_bucket_start,
@@ -208,14 +223,19 @@ $$;
 
 COMMENT ON FUNCTION public.analytics_usage_rollup_v4(text, timestamptz, timestamptz, text, text, text) IS
   'KAN-322 FR-A12 (D10): the customer Usage page totals per display category (usage_display_category). Reads the 345 '
-  'projection exactly as analytics_usage_rollup_v3, returns no model, provider or task label, and hides $0 company-data rows.';
+  'projection exactly as analytics_usage_rollup_v3, returns no model, provider or task label, and hides company-data groups '
+  'with no cost and no tokens.';
 
-REVOKE ALL ON FUNCTION public.usage_display_category(text, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.analytics_usage_rollup_v4(text, timestamptz, timestamptz, text, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.usage_display_category(text, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.analytics_usage_rollup_v4(text, timestamptz, timestamptz, text, text, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.usage_display_category(text, text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.analytics_usage_rollup_v4(text, timestamptz, timestamptz, text, text, text) TO service_role;
 
 -- Verify (read-only):
---   SELECT display_category, sellton_cost FROM public.analytics_usage_rollup_v4('<org_id>', now() - interval '30 days', now());
---   -- The four costs add up to v3's total for the same window:
---   SELECT ROUND(SUM(sellton_cost), 6) FROM public.analytics_usage_rollup_v3('<org_id>', now() - interval '30 days', now(), 'total');
+--   SELECT display_category, sellton_cost, total_tokens FROM public.analytics_usage_rollup_v4('<org_id>', now() - interval '30 days', now());
+--   -- The four costs (and tokens) add up to v3's for the same window:
+--   SELECT ROUND(SUM(sellton_cost), 6), SUM(total_tokens) FROM public.analytics_usage_rollup_v3('<org_id>', now() - interval '30 days', now(), 'total');
+--   -- Only service_role may call it (false, false, true):
+--   SELECT has_function_privilege('anon', 'public.analytics_usage_rollup_v4(text,timestamptz,timestamptz,text,text,text)', 'EXECUTE'),
+--          has_function_privilege('authenticated', 'public.analytics_usage_rollup_v4(text,timestamptz,timestamptz,text,text,text)', 'EXECUTE'),
+--          has_function_privilege('service_role', 'public.analytics_usage_rollup_v4(text,timestamptz,timestamptz,text,text,text)', 'EXECUTE');
