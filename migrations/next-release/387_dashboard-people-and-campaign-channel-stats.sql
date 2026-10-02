@@ -26,11 +26,12 @@
 --   "Just me" (p_user_id): email = campaigns I own (campaigns.user_id), LinkedIn = threads on my seat
 --     (linkedin_threads.owner_user_id), as the dashboard scopes today.
 --
--- Performance: every person is grouped once (no per-person subquery), and threads are attached to campaigns with
--- equality joins. Indexes used: idx_tasks_dashboard_email_sent_rollup (the enum comparison below matches its partial
--- predicate), idx_email_reply_events_org_received / _org_campaign_received, idx_linkedin_threads_org_recent /
--- _campaign / _contact, idx_linkedin_messages_chat, the linkedin_action_log campaign index (269),
--- idx_campaign_contacts_contact_id. STABLE, SECURITY INVOKER, service_role only. Measured by the review on a
+-- Performance: every person is grouped once (no per-person subquery); replied threads are found once and attached to
+-- campaigns through the wanted campaign contacts (one CTE, hash-joined on contact). campaign_emails is read by
+-- campaign. Indexes used: idx_tasks_dashboard_email_sent_rollup (the enum comparison below matches its partial
+-- predicate), idx_campaign_emails_campaign_id, idx_email_reply_events_org_received / _org_campaign_received,
+-- idx_linkedin_threads_org_recent, idx_linkedin_messages_chat, the linkedin_action_log campaign index (269),
+-- campaign_contacts (campaign_id, ...) indexes. STABLE, SECURITY INVOKER, service_role only. Measured by the review on a
 -- synthetic org (200k emails, 200k tasks, 50k threads, 300k messages).
 --
 -- Rollback: DROP FUNCTION IF EXISTS public.dashboard_people_reply_rollup_v1(text, timestamptz, timestamptz, text);
@@ -66,9 +67,10 @@ AS $$
   email_sends AS (
     SELECT ce.contact_id, COALESCE(ce.sent_at, ce.created_at) AS sent_at
     FROM public.campaign_emails ce
-    WHERE ce.organization_id = p_org_id
+    -- Scoped by campaign only: the campaigns are the organization's (an org filter here re-reads the org index per
+    -- campaign, review 2026-10-02).
+    WHERE ce.campaign_id IN (SELECT id FROM scoped_campaigns)
       AND ce.contact_id IS NOT NULL
-      AND ce.campaign_id IN (SELECT id FROM scoped_campaigns)
       AND (ce.sent_at IS NOT NULL OR ce.status::text IN ('sent', 'delivered', 'opened', 'clicked', 'replied'))
       AND COALESCE(ce.sent_at, ce.created_at) >= p_start
       AND COALESCE(ce.sent_at, ce.created_at) < p_end
@@ -201,8 +203,7 @@ AS $$
         ELSE 'campaign-email:' || ce.id::text
       END AS dedup_key
     FROM public.campaign_emails ce
-    WHERE ce.organization_id = p_org_id
-      AND ce.campaign_id IN (SELECT id FROM wanted)
+    WHERE ce.campaign_id IN (SELECT id FROM wanted)
       AND ce.contact_id IS NOT NULL
       AND (ce.sent_at IS NOT NULL OR ce.status::text IN ('sent', 'delivered', 'opened', 'clicked', 'replied'))
       AND LOWER(BTRIM(COALESCE(ce.metadata->>'email_type', ce.metadata->>'emailType', ce.metadata->>'type',
@@ -286,6 +287,11 @@ AS $$
   ),
   -- A thread belongs to the campaign it carries; an untagged thread belongs to the campaigns its contact is enrolled
   -- in on the same LinkedIn account, for replies after that enrolment (a re-enrolment does not inherit old replies).
+  wanted_contacts AS (
+    SELECT cc.campaign_id, cc.contact_id, cc.linkedin_account_id, cc.created_at
+    FROM public.campaign_contacts cc
+    WHERE cc.campaign_id IN (SELECT id FROM wanted)
+  ),
   li_replied AS (
     SELECT campaign_id, count(DISTINCT person) AS replied
     FROM (
@@ -293,13 +299,12 @@ AS $$
       FROM replied_threads rt
       WHERE rt.campaign_id IN (SELECT id FROM wanted)
       UNION
-      SELECT cc.campaign_id, rt.person
+      SELECT wc.campaign_id, rt.person
       FROM replied_threads rt
-      JOIN public.campaign_contacts cc
-        ON cc.contact_id = rt.contact_id
-       AND cc.linkedin_account_id IS NOT DISTINCT FROM rt.linkedin_account_id
-       AND cc.campaign_id IN (SELECT id FROM wanted)
-       AND rt.last_reply_at >= cc.created_at
+      JOIN wanted_contacts wc
+        ON wc.contact_id = rt.contact_id
+       AND wc.linkedin_account_id IS NOT DISTINCT FROM rt.linkedin_account_id
+       AND rt.last_reply_at >= wc.created_at
       WHERE rt.campaign_id IS NULL
     ) attached
     GROUP BY campaign_id
