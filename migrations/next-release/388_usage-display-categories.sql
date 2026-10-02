@@ -22,7 +22,8 @@
 --   A company-data group with no cost at all (original and Sellton) and no tokens is hidden, calls and counts
 --   included: those are $0 infrastructure rows (D10). A group is one projection key in one bucket (345's primary key:
 --   category, play, user, task, model, service, operation, company, run). The partial edge buckets are grouped by the
---   same key before the rule is applied, so a window's start never changes what is hidden.
+--   same key before the rule is applied. A hidden group always sums to $0 and 0 tokens, so cost and tokens never
+--   depend on the window; the calls and found counts of a $0 group may (an edge holds only the key's in-window rows).
 -- Costs are summed exactly as v3 does (ROUND(SUM(...), 6)) and a hidden group has no cost and no tokens, so the
 -- four categories' cost and tokens add up to v3's for the same window (Borce's acceptance check).
 --

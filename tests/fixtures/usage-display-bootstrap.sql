@@ -8,7 +8,8 @@ END $$;
 
 -- As on the Supabase image: functions created in public are granted to anon and authenticated by default, so a
 -- migration must revoke them explicitly. Without this line the contract's grant check would prove nothing.
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon, authenticated, service_role;
+-- service_role is left out on purpose, so that the migration's own GRANT to service_role is what the check sees.
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon, authenticated;
 
 CREATE TABLE public.usage (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
