@@ -46,3 +46,4 @@ migrations/release_1.4.0/371_billing-start-anchor.sql
 migrations/next-release/385_tasks-completed-sort-index.sql
 migrations/next-release/386_task-stats-counts-rpc.sql
 migrations/next-release/379_mobile-app.sql
+migrations/next-release/387_dashboard-people-and-campaign-channel-stats.sql
