@@ -15,6 +15,17 @@ already-applied migration without adding a second path to the deploy manifest.
 The runner still treats the full path plus SHA-256 as its identity; hash equality
 in this check does not mark an unlisted path as applied.
 
+For the stage-to-production release after 2026-09-30, retain the production
+bytes and SHA of `release_1.3.0/369_deal-activity-type-check-extension.sql` on
+`main`: that path is already recorded in the production ledger. Stage applied a
+different version of the same path. The production manifest keeps its 30
+previously applied entries in order and appends stage-only migrations. New
+`next-release/384_crm-deal-signal-activity.sql` carries the `signal` check
+forward after the guarded RPC from stage migration 371. Do not replace the
+applied 369 file with stage's version or add alternate-path copies of SQL
+already applied under the production path. Run `plan production` against the
+exact release branch before merging it into `main`.
+
 ## Commands
 
 Run from `selltonai-database/supabase`:
