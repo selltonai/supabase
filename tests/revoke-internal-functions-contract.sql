@@ -7,7 +7,8 @@ BEGIN
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname = 'public' AND p.proname IN (
       'claim_due_sequence_actions', 'delete_organization_file_fast', 'get_organization_summary',
-      'analytics_usage_rollup', 'usage_analytics_projection_contribution', 'log_file_upload')
+      'analytics_usage_rollup', 'usage_analytics_projection_contribution', 'log_file_upload',
+      'reserve_billing_invoice_number')
   LOOP
     IF has_function_privilege('anon', r.oid, 'EXECUTE') OR has_function_privilege('authenticated', r.oid, 'EXECUTE') THEN
       RAISE EXCEPTION 'still exposed: %', r.fn;

@@ -11,8 +11,13 @@ trap '"$PG_BIN/pg_ctl" -D "$data" -m immediate stop >/dev/null 2>&1 || true; rm 
 psql_db() { "$PG_BIN/psql" -X -q -h "$sock" -p "$port" -U postgres -v ON_ERROR_STOP=1 -d "$1" "${@:2}"; }
 migration=migrations/next-release/390_revoke-public-execute-on-internal-functions.sql
 
+# 0. The bootstrap really exposes the functions (else every check below would pass trivially).
+psql_db postgres -f tests/fixtures/revoke-internal-functions-bootstrap.sql
+exposed="$(psql_db postgres -At -c "SELECT count(*) FROM pg_proc WHERE proname IN ('claim_due_sequence_actions', 'reserve_billing_invoice_number', 'log_file_upload') AND has_function_privilege('anon', oid, 'EXECUTE')")"
+[ "$exposed" = "3" ] || { echo "Bootstrap must expose the functions to anon before the migration (got $exposed of 3)"; exit 1; }
+
 # 1. The migration applies, is idempotent, and leaves the contract true.
-for sql in tests/fixtures/revoke-internal-functions-bootstrap.sql "$migration" "$migration" tests/revoke-internal-functions-contract.sql; do
+for sql in "$migration" "$migration" tests/revoke-internal-functions-contract.sql; do
   echo "Checking $sql"
   psql_db postgres -f "$sql"
 done
