@@ -49,5 +49,6 @@ migrations/next-release/386_task-stats-counts-rpc.sql
 migrations/next-release/379_mobile-app.sql
 migrations/next-release/387_dashboard-people-and-campaign-channel-stats.sql
 migrations/next-release/388_usage-display-categories.sql
-migrations/next-release/389_crm-deal-signal-activity.sql
+migrations/next-release/384_crm-deal-signal-activity.sql
+migrations/next-release/389_remove_sellton_brain_database_webhooks.sql
 migrations/next-release/390_revoke-public-execute-on-internal-functions.sql
