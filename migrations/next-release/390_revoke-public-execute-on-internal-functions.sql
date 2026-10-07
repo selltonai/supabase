@@ -11,15 +11,22 @@
 --     apply_/sync_/backfill_/complete_  write the usage projection
 --     analytics_usage_rollup[_v2|_v3]   read any workspace's usage and cost
 --     get_organization_summary, get_companies_by_campaign   read any workspace's data
+--     reserve_billing_invoice_number    reserves (burns) invoice numbers; 317 revoked PUBLIC only, which
+--                                       leaves Supabase's direct anon/authenticated default grants in place
 --
 -- Who still calls them, and how (checked 2026-10-07 on selltonai origin/main + origin/stage, modal
--- production + stage, backoffice master, gmail-api, vector-api):
---   selltonai only, always with the service role key:
+-- production + stage, backoffice master, gmail-api, vector-api). Every caller is server-side and uses the
+-- service role key; five selltonai callers and Modal's connection manager FALL BACK to the anon key only
+-- when SUPABASE_SERVICE_ROLE_KEY is missing (a misconfigured environment, never production, where
+-- supabaseAdmin already requires the key). After this migration such a misconfiguration fails instead of
+-- quietly running as anon. Callers:
 --     claim_due_sequence_actions   api/internal/sequence/claim/route.ts (supabaseAdmin)
 --     analytics_usage_rollup       api/analytics/{phone-discovery,usage-costs/daily,usage-costs/monthly} (supabaseAdmin)
 --     analytics_usage_rollup_v3    api/analytics/usage-rollup/route.ts (SUPABASE_SERVICE_ROLE_KEY)
 --     delete_organization_file_fast services/files.service.ts (SUPABASE_SERVICE_ROLE_KEY)
 --     get_companies_by_campaign    api/companies/route.ts (SUPABASE_SERVICE_ROLE_KEY)
+--   selltonai-modal:
+--     reserve_billing_invoice_number services/billing_service.py:2145 (connection_manager, service role)
 --   No pg_cron job, RLS policy or SECURITY INVOKER function calls any of them. apply_usage_analytics_
 --   projection_delta is called only inside SECURITY DEFINER functions (they run as the owner).
 --   The deal and file-upload functions are trigger functions: PostgreSQL checks EXECUTE on a trigger
@@ -43,6 +50,7 @@ DECLARE
     'delete_organization_file_fast',
     'get_organization_summary',
     'get_companies_by_campaign',
+    'reserve_billing_invoice_number',
     'analytics_usage_rollup',
     'analytics_usage_rollup_v2',
     'analytics_usage_rollup_v3',

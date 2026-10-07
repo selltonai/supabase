@@ -24,6 +24,10 @@ CREATE FUNCTION public.analytics_usage_rollup(p_org text, p_from timestamptz, p_
 RETURNS integer LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$ SELECT 1 $$;
 CREATE FUNCTION public.analytics_usage_rollup(p_org text)
 RETURNS integer LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$ SELECT 2 $$;
+-- 317's shape: revoked from PUBLIC only, so Supabase's direct anon/authenticated default grants remain.
+CREATE FUNCTION public.reserve_billing_invoice_number(p_year integer, p_prefix text, p_start integer, p_org text)
+RETURNS text LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$ SELECT p_prefix $$;
+REVOKE ALL ON FUNCTION public.reserve_billing_invoice_number(integer, text, integer, text) FROM PUBLIC;
 -- A non-definer one on the list.
 CREATE FUNCTION public.usage_analytics_projection_contribution(p_value integer)
 RETURNS integer LANGUAGE sql AS $$ SELECT p_value $$;
