@@ -48,3 +48,7 @@ migrations/next-release/386_task-stats-counts-rpc.sql
 migrations/next-release/390_revoke-public-execute-on-internal-functions.sql
 migrations/next-release/392_phone-found-price-040-backfill.sql
 migrations/next-release/393_phone-found-price-040-catch-up.sql
+migrations/next-release/379_mobile-app.sql
+migrations/next-release/387_dashboard-people-and-campaign-channel-stats.sql
+migrations/next-release/388_usage-display-categories.sql
+migrations/next-release/391_customer-requests.sql
