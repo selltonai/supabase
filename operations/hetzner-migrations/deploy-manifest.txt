@@ -60,3 +60,4 @@ migrations/next-release/395_usage-idempotency-and-batch-write.sql
 migrations/next-release/396_mobile-usage-on-usage-pages.sql
 migrations/next-release/397_usage-summary-recount-and-duplicate-indexes.sql
 migrations/next-release/398_linkedin-thread-has-inbound.sql
+migrations/next-release/399_autonomous-offer-approval-counts.sql
