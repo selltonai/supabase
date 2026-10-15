@@ -20,7 +20,7 @@
 --                    accepted_by when its session expires), or, with no accepted_by at all (the legacy PATCH),
 --                    completed_by_user_id. Autonomous writes accepted_by 'api' and completed_by_user_id 'api'.
 --                    The kind is Modal's email_type (frontend_task_service.py), read as Modal reads it:
---                    email_type, emailType, type, reply_type.
+--                    the first non-empty of email_type, emailType, type, reply_type, replyType, trimmed and lower-cased.
 --   LinkedIn         task_type review_draft, channel linkedin, status completed or scheduled, and a user in
 --                    metadata.last_dispatch.approved_by_user_id (sent now) or metadata.li_dispatch_approved_by
 --                    (scheduled, kept when the dispatcher completes it). Autonomous writes neither to a user
@@ -59,7 +59,8 @@ AS $$
       t.status::text AS status,
       nullif(t.completed_by_user_id, '') AS completed_by,
       t.metadata AS m,
-      lower(coalesce(t.metadata->>'email_type', t.metadata->>'emailType', t.metadata->>'type', t.metadata->>'reply_type', '')) AS email_kind
+      lower(btrim(coalesce(nullif(t.metadata->>'email_type', ''), nullif(t.metadata->>'emailType', ''), nullif(t.metadata->>'type', ''),
+                           nullif(t.metadata->>'reply_type', ''), nullif(t.metadata->>'replyType', ''), ''))) AS email_kind
     FROM public.tasks t
     WHERE t.organization_id = p_organization_id
       AND t.campaign_id IS NOT NULL
