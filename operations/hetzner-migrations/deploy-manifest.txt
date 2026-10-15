@@ -55,4 +55,8 @@ migrations/next-release/390_revoke-public-execute-on-internal-functions.sql
 migrations/next-release/391_customer-requests.sql
 migrations/next-release/392_phone-found-price-040-backfill.sql
 migrations/next-release/393_phone-found-price-040-catch-up.sql
+migrations/next-release/394_close-usage-tables-to-browser-key.sql
+migrations/next-release/395_usage-idempotency-and-batch-write.sql
+migrations/next-release/396_mobile-usage-on-usage-pages.sql
+migrations/next-release/397_usage-summary-recount-and-duplicate-indexes.sql
 migrations/next-release/398_linkedin-thread-has-inbound.sql

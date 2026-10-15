@@ -12,10 +12,11 @@ trap '"$PG_BIN/pg_ctl" -D "$data" -m immediate stop >/dev/null 2>&1 || true; rm 
 awk '/^CREATE OR REPLACE FUNCTION public.usage_(metadata_[a-z]+|provider_label)\(/,/^\$\$;/' \
   migrations/release_1.2.0/326_speed-up-usage-billing-pages.sql > "$helpers"
 for sql in tests/fixtures/usage-display-bootstrap.sql \
+           tests/fixtures/mobile-usage-x1-bootstrap.sql \
            "$helpers" \
            migrations/release_1.3.0/345_usage-analytics-projection.sql \
            migrations/next-release/388_usage-display-categories.sql \
-           migrations/next-release/388_usage-display-categories.sql \
+           migrations/next-release/396_mobile-usage-on-usage-pages.sql \
            tests/usage-display-categories-contract.sql; do
   echo "Checking $sql"
   "$PG_BIN/psql" -X -q -h "$sock" -p "$port" -U postgres -v ON_ERROR_STOP=1 -f "$sql"

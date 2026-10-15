@@ -3,13 +3,15 @@
 BEGIN;
 SET LOCAL TIME ZONE 'UTC';
 
--- 1. The Writing list is pinned: exactly these twelve services are Writing; any other LLM service is Research.
+-- 1. The Writing list is pinned: exactly these fourteen services are Writing (the phone's two since 396); any other
+--    LLM service is Research.
 DO $$
 DECLARE
   writing text[] := ARRAY[
     'email_generation_service', 'email_generation', 'hyper_personalized_email_service', 'hyper_personalized_email',
     'linkedin_copywriter_service', 'email_reply_processor_service', 'email_reply_processor', 'reply_handler_service',
-    'email_intent_service', 'security_guardrails_service', 'deal_nurture_service', 'call_pitch_service'];
+    'email_intent_service', 'security_guardrails_service', 'deal_nurture_service', 'call_pitch_service',
+    'mobile_email_writing', 'mobile_reply_handling'];
   s text;
   body text;
   listed int;
@@ -27,10 +29,10 @@ BEGIN
   -- The onboarding interview (provider retell, which 345 files under b2b_data) is Research, by D10.
   IF public.usage_display_category('b2b_data', 'retell') <> 'research' THEN RAISE EXCEPTION 'retell is research'; END IF;
 
-  -- No thirteenth Writing service slips in: count the quoted names in the IN list of the function body.
+  -- No fifteenth Writing service slips in: count the quoted names in the IN list of the function body.
   SELECT prosrc INTO body FROM pg_proc WHERE oid = 'public.usage_display_category(text, text)'::regprocedure;
   SELECT count(*) INTO listed FROM regexp_matches(split_part(split_part(body, 'IN (', 2), ')', 1), '''[a-z_]+''', 'g');
-  IF listed <> 12 THEN RAISE EXCEPTION 'writing list has % entries, expected 12', listed; END IF;
+  IF listed <> 14 THEN RAISE EXCEPTION 'writing list has % entries, expected 14', listed; END IF;
 END $$;
 
 -- 2. The result never carries a model, provider or task label.
