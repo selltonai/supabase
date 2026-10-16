@@ -48,3 +48,5 @@ migrations/next-release/386_task-stats-counts-rpc.sql
 migrations/next-release/390_revoke-public-execute-on-internal-functions.sql
 migrations/next-release/392_phone-found-price-040-backfill.sql
 migrations/next-release/393_phone-found-price-040-catch-up.sql
+migrations/next-release/400_crm-list-delete-jobs-and-company-move.sql
+migrations/next-release/401_crm-delete-foreign-key-indexes.sql
