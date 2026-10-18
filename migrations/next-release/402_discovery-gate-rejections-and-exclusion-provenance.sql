@@ -7,7 +7,7 @@
 --    "Added by Sellton: competitor" and the customer can remove it.
 --
 -- Additive only. The Modal code runs without these (it logs and goes on), so the order of the
--- two deploys does not matter. Rollback: rollback/400_discovery-gate-rejections-and-exclusion-provenance.rollback.sql
+-- two deploys does not matter. Rollback: rollback/402_discovery-gate-rejections-and-exclusion-provenance.rollback.sql
 
 ALTER TABLE public.organization_icp_linkedin_urls
   ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'manual',

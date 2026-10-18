@@ -1,4 +1,4 @@
--- Reverses 400. The Modal code tolerates the missing table and columns (it logs and goes on),
+-- Reverses 402. The Modal code tolerates the missing table and columns (it logs and goes on),
 -- so this can run while the gate is live; the gate then has no memory of earlier rejections.
 DROP TABLE IF EXISTS public.discovery_rejections;
 
