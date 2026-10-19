@@ -22,8 +22,9 @@
 -- play; a review draft without an approved campaign_companies pair; open work of a play that is not running for it),
 -- the reply clause (review_reply or metadata.email_type = 'reply'), the sentiment sets, the buckets and channels.
 --
--- Performance: as 386 (org-scoped, joins by primary key, approval as a hashed semi-join); the due bounds can use
--- idx_tasks_org_due_date. STABLE, SECURITY INVOKER, service_role only.
+-- Performance: as 386 (org-scoped, joins by primary key, approval as a hashed semi-join). The due bounds are a filter
+-- on the org-scoped scan (the plan is generic, so idx_tasks_org_due_date is not chosen); no regression against v1
+-- (EXPLAIN on 400k rows, 2026-10-19). STABLE, SECURITY INVOKER, service_role only.
 --
 -- Rollback (safe): migrations/next-release/rollback/408_task-stats-counts-v2.rollback.sql
 --   DROP FUNCTION IF EXISTS public.task_stats_counts_v2(text, text, text, text, uuid, uuid, uuid, boolean, text, text, text, timestamptz, timestamptz);
