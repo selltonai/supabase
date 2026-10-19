@@ -16,9 +16,33 @@ BEGIN
   SELECT relrowsecurity INTO rls FROM pg_class WHERE oid = 'public.organization_settings'::regclass;
   IF NOT rls THEN RAISE EXCEPTION 'row-level security was turned off'; END IF;
 
-  -- One constraint, even after the migration ran twice.
+  -- timezone_source: text, nullable, no default, NULL on existing rows.
+  SELECT data_type || '|' || is_nullable || '|' || coalesce(column_default, 'none') INTO got
+  FROM information_schema.columns
+  WHERE table_schema = 'public' AND table_name = 'organization_settings' AND column_name = 'timezone_source';
+  IF got IS DISTINCT FROM 'text|YES|none' THEN RAISE EXCEPTION 'timezone_source column: %', got; END IF;
+  SELECT count(*)::text INTO got FROM public.organization_settings WHERE timezone_source IS NOT NULL;
+  IF got <> '0' THEN RAISE EXCEPTION 'timezone_source backfilled: %', got; END IF;
+
+  -- One of each constraint, even after the migration ran twice.
   SELECT count(*)::text INTO got FROM pg_constraint WHERE conname = 'organization_settings_timezone_shape';
   IF got <> '1' THEN RAISE EXCEPTION 'shape constraint count: %', got; END IF;
+  SELECT count(*)::text INTO got FROM pg_constraint WHERE conname = 'organization_settings_timezone_source_check';
+  IF got <> '1' THEN RAISE EXCEPTION 'source constraint count: %', got; END IF;
+END $$;
+
+-- The two sources, and NULL; anything else is refused.
+UPDATE public.organization_settings SET timezone = 'Europe/Skopje', timezone_source = 'browser' WHERE organization_id = 'org_b';
+UPDATE public.organization_settings SET timezone_source = 'settings' WHERE organization_id = 'org_b';
+UPDATE public.organization_settings SET timezone = NULL, timezone_source = NULL WHERE organization_id = 'org_b';
+DO $$
+DECLARE refused boolean := false;
+BEGIN
+  BEGIN
+    UPDATE public.organization_settings SET timezone_source = 'onboarding' WHERE organization_id = 'org_b';
+  EXCEPTION WHEN check_violation THEN refused := true;
+  END;
+  IF NOT refused THEN RAISE EXCEPTION 'accepted timezone_source onboarding'; END IF;
 END $$;
 
 -- Names the shape accepts: real IANA names, UTC, deep and signed ones, and NULL again.
