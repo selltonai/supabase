@@ -51,3 +51,9 @@ migrations/next-release/393_phone-found-price-040-catch-up.sql
 migrations/next-release/400_crm-list-delete-jobs-and-company-move.sql
 migrations/next-release/401_crm-delete-foreign-key-indexes.sql
 migrations/next-release/402_discovery-gate-rejections-and-exclusion-provenance.sql
+migrations/next-release/379_mobile-app.sql
+migrations/next-release/387_dashboard-people-and-campaign-channel-stats.sql
+migrations/next-release/388_usage-display-categories.sql
+migrations/next-release/391_customer-requests.sql
+migrations/next-release/398_linkedin-thread-has-inbound.sql
+migrations/next-release/399_autonomous-offer-approval-counts.sql
