@@ -52,3 +52,4 @@ migrations/next-release/400_crm-list-delete-jobs-and-company-move.sql
 migrations/next-release/401_crm-delete-foreign-key-indexes.sql
 migrations/next-release/402_discovery-gate-rejections-and-exclusion-provenance.sql
 migrations/next-release/403_user-organizations-canonical-role.sql
+migrations/next-release/404_user-calendar-connections.sql
