@@ -9,14 +9,18 @@
 --            to v1 (and no 'all' figure) while v2 is missing.
 -- Contract:  One new read-only function; v1 is kept (readers on v1 and the comparison log keep working). No table,
 --            column, constraint, RLS, trigger, cron or queue change. Safe to drop.
--- Person:    email = contact_id; LinkedIn = coalesce(thread.contact_id, 'li:' || counterpart_provider_id), as v1. A
---            LinkedIn thread linked to the same contact is the same person; an unlinked LinkedIn counterpart is a
---            person of its own (it cannot be matched to an email contact).
+-- Person:    email = contact_id; LinkedIn = coalesce(thread.contact_id, 'li:' || counterpart_provider_id), as v1. In the
+--            'all' row only, an unlinked counterpart is matched to the workspace's contact with that LinkedIn id
+--            (contacts.linkedin_provider_id, 365/362; the first by id if several), so a person emailed and messaged
+--            on LinkedIn counts once; a counterpart with no contact stays a person of its own. The email and LinkedIn
+--            rows keep v1's keys exactly.
+-- Known limit: merged duplicate contacts (contacts.canonical_contact_id, 273) count as separate people, as in v1.
 --   all.people_reached       distinct people sent outreach on either channel in the window
 --   all.people_replied       distinct people with a countable reply on either channel in the window
 --   all.reached_and_replied  of those reached, those whose last reply (either channel) is at or after their first
 --                            outreach (either channel) in the window: never more than all.people_reached
--- Performance: as v1 (the same scans); the union adds one group over at most both channels' people.
+-- Performance: as v1 (the same scans); the union adds one group over at most both channels' people, and one lookup
+--            per unlinked counterpart by idx_contacts_org_linkedin_provider_id (365).
 --            STABLE, SECURITY INVOKER, service_role only.
 -- Rollback: next-release/rollback/406-407_dashboard-outcomes-and-people-v2.rollback.sql
 -- ============================================================
@@ -125,7 +129,17 @@ AS $$
     FROM (
       SELECT contact_id::text AS person, first_sent_at, last_reply_at FROM email_people
       UNION ALL
-      SELECT person, first_sent_at, last_reply_at FROM li_people
+      SELECT COALESCE(matched.id::text, lp.person), lp.first_sent_at, lp.last_reply_at
+      FROM li_people lp
+      LEFT JOIN LATERAL (
+        SELECT c.id
+        FROM public.contacts c
+        WHERE lp.person LIKE 'li:%'
+          AND c.organization_id = p_org_id
+          AND c.linkedin_provider_id = substr(lp.person, 4)
+        ORDER BY c.id
+        LIMIT 1
+      ) matched ON true
     ) both_channels
     GROUP BY person
   )

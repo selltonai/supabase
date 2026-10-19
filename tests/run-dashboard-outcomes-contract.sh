@@ -23,6 +23,7 @@ for sql in tests/fixtures/dashboard-outcomes-bootstrap.sql \
 done
 for sql in tests/fixtures/dashboard-people-bootstrap.sql \
            migrations/next-release/387_dashboard-people-and-campaign-channel-stats.sql \
+           tests/fixtures/dashboard-people-v2-bootstrap.sql \
            migrations/next-release/407_dashboard-people-reply-rollup-v2.sql \
            migrations/next-release/407_dashboard-people-reply-rollup-v2.sql \
            tests/dashboard-people-rollup-contract.sql \

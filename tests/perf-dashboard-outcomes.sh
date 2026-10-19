@@ -31,11 +31,11 @@ INSERT INTO campaign_contacts (campaign_id, contact_id, organization_id, created
   FROM generate_series(1, 60000) g;
 INSERT INTO deals SELECT ('00000000-0000-0000-0004-' || lpad(g::text, 12, '0'))::uuid, CASE WHEN g <= 8000 THEN 'big' ELSE 'other' END,
   ('00000000-0000-0000-0003-' || lpad(g::text, 12, '0'))::uuid, NULL, 'u' || (g % 20),
-  CASE WHEN g % 5 = 0 THEN 'WON' ELSE 'MEETING_BOOKED' END, g, 'EUR', CASE WHEN g % 5 = 0 THEN timestamptz '2026-09-01' + (g % 40) * interval '1 day' END
+  CASE WHEN g % 7 = 0 THEN 'WON' ELSE 'MEETING_BOOKED' END, g, 'EUR', CASE WHEN g % 7 = 0 THEN timestamptz '2026-09-01' + (g % 40) * interval '1 day' END
   FROM generate_series(1, 16000) g;
 INSERT INTO deal_activities (deal_id, organization_id, activity_type, metadata, created_at)
   SELECT ('00000000-0000-0000-0004-' || lpad((((g - 1) % 16000) + 1)::text, 12, '0'))::uuid, CASE WHEN ((g - 1) % 16000) < 8000 THEN 'big' ELSE 'other' END,
-         'stage_change', jsonb_build_object('to', CASE g % 4 WHEN 0 THEN 'MEETING_BOOKED' WHEN 1 THEN 'LEAD' WHEN 2 THEN 'PRESENTATION' ELSE 'NOTE' END),
+         'stage_change', jsonb_build_object('to', CASE (g / 16000) % 4 WHEN 0 THEN 'MEETING_BOOKED' WHEN 1 THEN 'LEAD' WHEN 2 THEN 'PRESENTATION' ELSE 'NOTE' END),
          timestamptz '2025-06-01' + (g % 500) * interval '1 day' FROM generate_series(1, 80000) g;
 ANALYZE;
 SQL

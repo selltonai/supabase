@@ -23,9 +23,13 @@ INSERT INTO public.campaign_companies (campaign_id, company_id, organization_id,
   (pg_temp.u(1, 4), pg_temp.u(2, 5), 'org_o', '2026-09-27', NULL),
   (pg_temp.u(1, 5), pg_temp.u(2, 6), 'org_o', '2026-09-26', false),
   (pg_temp.u(1, 3), pg_temp.u(2, 7), 'org_o', '2026-09-20', false),
-  (pg_temp.u(1, 9), pg_temp.u(2, 9), 'org_x', '2026-09-25', false);
+  (pg_temp.u(1, 9), pg_temp.u(2, 9), 'org_x', '2026-09-25', false),
+  -- K8 joined e1 in the window, then the customer declined it in review (status 'rejected'): links no one.
+  (pg_temp.u(1, 1), pg_temp.u(2, 8), 'org_o', '2026-09-26', false);
+UPDATE public.campaign_companies SET status = 'rejected' WHERE company_id = pg_temp.u(2, 8);
+UPDATE public.campaign_companies SET status = 'approved' WHERE company_id = pg_temp.u(2, 1);
 
-INSERT INTO public.contacts VALUES
+INSERT INTO public.contacts (id, organization_id, created_at) VALUES
   (pg_temp.u(3, 1), 'org_o', '2026-09-01'),   -- P1 at K1: linked when K1 joined (09-25) -> new (team, me)
   (pg_temp.u(3, 2), 'org_o', '2026-09-26'),   -- P2 at K2: found later (09-26), K2 joined 09-01 -> new (team, me)
   (pg_temp.u(3, 3), 'org_o', '2026-08-01'),   -- P3 at K2: linked 09-01 -> not new
@@ -39,7 +43,14 @@ INSERT INTO public.contacts VALUES
   (pg_temp.u(3, 12), 'org_o', '2026-09-01'),  -- P12 at K7 (mixed, 09-20) -> not new
   (pg_temp.u(3, 13), 'org_o', '2026-09-01'),  -- P13 at K7 (09-20), enrolled in my l1 09-28 -> new for me only
   (pg_temp.u(3, 14), 'org_o', '2026-09-01'),  -- P14 at K5 (n1, a colleague's) linked 09-27 -> new (team only)
-  (pg_temp.u(3, 99), 'org_x', '2026-09-01');  -- another workspace
+  (pg_temp.u(3, 99), 'org_x', '2026-09-01'),  -- another workspace
+  (pg_temp.u(3, 15), 'org_o', '2026-09-01'),  -- P15 at K8 (declined) -> never linked
+  (pg_temp.u(3, 16), 'org_o', '2026-09-01'),  -- P16 at K1, a duplicate of P1 (canonical P1) -> P1 once
+  (pg_temp.u(3, 17), 'org_o', '2026-09-01');  -- P17 at K2 (09-01): its duplicate P18, enrolled 09-27, is P17 -> not new
+-- P18 is a duplicate of P17 (created later); P19 was enrolled but the person was deleted (no contacts row).
+INSERT INTO public.contacts (id, organization_id, created_at, canonical_contact_id) VALUES
+  (pg_temp.u(3, 18), 'org_o', '2026-09-27', pg_temp.u(3, 17));
+UPDATE public.contacts SET canonical_contact_id = pg_temp.u(3, 1) WHERE id = pg_temp.u(3, 16);
 
 INSERT INTO public.company_contacts (company_id, contact_id, organization_id) VALUES
   (pg_temp.u(2, 1), pg_temp.u(3, 1), 'org_o'), (pg_temp.u(2, 2), pg_temp.u(3, 2), 'org_o'),
@@ -49,13 +60,17 @@ INSERT INTO public.company_contacts (company_id, contact_id, organization_id) VA
   (pg_temp.u(2, 6), pg_temp.u(3, 9), 'org_o'), (pg_temp.u(2, 1), pg_temp.u(3, 10), 'org_o'),
   (pg_temp.u(2, 5), pg_temp.u(3, 10), 'org_o'), (pg_temp.u(2, 7), pg_temp.u(3, 12), 'org_o'),
   (pg_temp.u(2, 7), pg_temp.u(3, 13), 'org_o'), (pg_temp.u(2, 9), pg_temp.u(3, 99), 'org_x'),
-  (pg_temp.u(2, 5), pg_temp.u(3, 14), 'org_o');
+  (pg_temp.u(2, 5), pg_temp.u(3, 14), 'org_o'),
+  (pg_temp.u(2, 8), pg_temp.u(3, 15), 'org_o'), (pg_temp.u(2, 1), pg_temp.u(3, 16), 'org_o'),
+  (pg_temp.u(2, 2), pg_temp.u(3, 17), 'org_o');
 
 INSERT INTO public.campaign_contacts (campaign_id, contact_id, organization_id, created_at) VALUES
   (pg_temp.u(1, 2), pg_temp.u(3, 6), 'org_o', '2026-09-27'),
   (pg_temp.u(1, 2), pg_temp.u(3, 8), 'org_o', '2026-09-10'),
   (pg_temp.u(1, 5), pg_temp.u(3, 9), 'org_o', '2026-10-01'),
-  (pg_temp.u(1, 2), pg_temp.u(3, 13), 'org_o', '2026-09-28');
+  (pg_temp.u(1, 2), pg_temp.u(3, 13), 'org_o', '2026-09-28'),
+  (pg_temp.u(1, 2), pg_temp.u(3, 18), 'org_o', '2026-09-27'),
+  (pg_temp.u(1, 2), pg_temp.u(3, 19), 'org_o', '2026-09-27');
 
 -- Deals and their stage history.
 INSERT INTO public.deals VALUES
@@ -118,7 +133,8 @@ INSERT INTO public.deal_activities (deal_id, organization_id, activity_type, met
 DO $$
 DECLARE r record;
 BEGIN
-  -- All team: new people P1, P2, P6, P7, P10, P14 = 6; meetings P1 (D1, D2, D13), P2, P7, D6, P13, P10 = 6 (not D12);
+  -- All team: new people P1 (and its duplicate P16), P2, P6, P7, P10, P14 = 6 (not P15: declined; not P17/P18: P17
+  -- linked 09-01; not P19: deleted); meetings P1 (D1, D2, D13), P2, P7, D6, P13, P10 = 6 (not D12);
   -- won D6, D7, D8, D11 = 4, EUR 3000, USD 500.
   SELECT * INTO r FROM public.dashboard_outcomes_v1('org_o', '2026-09-24', '2026-10-01');
   IF (r.new_people, r.meetings, r.deals_won) IS DISTINCT FROM (6::bigint, 6::bigint, 4::bigint) THEN
@@ -139,10 +155,10 @@ BEGIN
   END IF;
   -- (The set for me differs from the team's: P13 in, P7 and P14 out.)
 
-  -- The window before: new people P3 (09-01), P8 (09-10), P12 and P13 for the team (09-20) = 4;
+  -- The window before: new people P3 and P17 (09-01), P8 (09-10), P12 and P13 for the team (09-20) = 5;
   -- meetings D4 (P3, 09-10), D11 (P8, 09-01) = 2; nothing won.
   SELECT * INTO r FROM public.dashboard_outcomes_v1('org_o', '2026-08-24', '2026-09-24');
-  IF (r.new_people, r.meetings, r.deals_won, r.won_value) IS DISTINCT FROM (4::bigint, 2::bigint, 0::bigint, '{}'::jsonb) THEN
+  IF (r.new_people, r.meetings, r.deals_won, r.won_value) IS DISTINCT FROM (5::bigint, 2::bigint, 0::bigint, '{}'::jsonb) THEN
     RAISE EXCEPTION 'previous window: got % % % %', r.new_people, r.meetings, r.deals_won, r.won_value;
   END IF;
 

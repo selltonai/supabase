@@ -8,10 +8,10 @@ END $$;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon, authenticated;
 
 CREATE TABLE public.campaigns (id uuid PRIMARY KEY, organization_id text NOT NULL, user_id text, channel_strategy text);
-CREATE TABLE public.contacts (id uuid PRIMARY KEY, organization_id text NOT NULL, created_at timestamptz NOT NULL);
+CREATE TABLE public.contacts (id uuid PRIMARY KEY, organization_id text NOT NULL, created_at timestamptz NOT NULL, canonical_contact_id uuid);
 CREATE TABLE public.campaign_companies (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), campaign_id uuid NOT NULL, company_id uuid NOT NULL, organization_id text,
-  created_at timestamptz NOT NULL, blocked_by_icp boolean DEFAULT false
+  created_at timestamptz NOT NULL, blocked_by_icp boolean DEFAULT false, status text
 );
 CREATE TABLE public.company_contacts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), company_id uuid NOT NULL, contact_id uuid NOT NULL, organization_id text NOT NULL

@@ -10,6 +10,14 @@
 --   Y5 replied on LinkedIn 09-25, then emailed 09-27 (the reply came before any outreach).
 --   Y6 emailed 09-25, replied by email 09-26; LinkedIn outreach later (09-28): the FIRST outreach is the email.
 --   Y7 replied on LinkedIn 09-25, emailed 09-26, replied by email 09-28: the LAST reply follows the first outreach.
+--   Y8 emailed 09-25; its LinkedIn thread is NOT linked to the contact (counterpart urn:y8), but the contact carries that
+--      LinkedIn id: out 09-26, in 09-27 -> one person in 'all'. A contact of another workspace with Y3's LinkedIn id
+--      does not make Y3 one of its people.
+INSERT INTO public.contacts (id, organization_id, linkedin_provider_id) VALUES
+  ('00000000-0000-0000-0000-0000000000b8', 'org_y', 'urn:y8'),
+  -- Another workspace's contact with Y3's LinkedIn id. Its id is Y2's (emailed in org_y, not in org_y's contacts), so
+  -- matching across workspaces would merge Y3 into Y2 and show.
+  ('00000000-0000-0000-0000-0000000000b2', 'org_a', 'urn:y3');
 INSERT INTO public.campaigns VALUES ('00000000-0000-0000-0000-0000000000f1', 'org_y', 'u_me');
 INSERT INTO public.campaign_emails (organization_id, campaign_id, contact_id, status, sent_at) VALUES
   ('org_y', '00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-0000000000b1', 'sent', '2026-09-25'),
@@ -17,7 +25,8 @@ INSERT INTO public.campaign_emails (organization_id, campaign_id, contact_id, st
   ('org_y', '00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-0000000000b4', 'sent', '2026-09-27'),
   ('org_y', '00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-0000000000b5', 'sent', '2026-09-27'),
   ('org_y', '00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-0000000000b6', 'sent', '2026-09-25'),
-  ('org_y', '00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-0000000000b7', 'sent', '2026-09-26');
+  ('org_y', '00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-0000000000b7', 'sent', '2026-09-26'),
+  ('org_y', '00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-0000000000b8', 'sent', '2026-09-25');
 INSERT INTO public.email_reply_events (organization_id, contact_id, campaign_id, received_at) VALUES
   ('org_y', '00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-0000000000f1', '2026-09-29'),
   ('org_y', '00000000-0000-0000-0000-0000000000b6', '00000000-0000-0000-0000-0000000000f1', '2026-09-26'),
@@ -28,14 +37,16 @@ INSERT INTO public.linkedin_threads (organization_id, owner_user_id, contact_id,
   ('org_y', 'u_me', '00000000-0000-0000-0000-0000000000b4', 'y4', 'urn:y4', 'campaign_inbound'),
   ('org_y', 'u_me', '00000000-0000-0000-0000-0000000000b5', 'y5', 'urn:y5', 'campaign_inbound'),
   ('org_y', 'u_me', '00000000-0000-0000-0000-0000000000b6', 'y6', 'urn:y6', 'sellton_outbound'),
-  ('org_y', 'u_me', '00000000-0000-0000-0000-0000000000b7', 'y7', 'urn:y7', 'campaign_inbound');
+  ('org_y', 'u_me', '00000000-0000-0000-0000-0000000000b7', 'y7', 'urn:y7', 'campaign_inbound'),
+  ('org_y', 'u_me', NULL, 'y8', 'urn:y8', 'sellton_outbound');
 INSERT INTO public.linkedin_messages (organization_id, unipile_chat_id, direction, occurred_at) VALUES
   ('org_y', 'y1', 'outbound', '2026-09-26'), ('org_y', 'y1', 'inbound', '2026-09-27'),
   ('org_y', 'y3', 'outbound', '2026-09-25'), ('org_y', 'y3', 'inbound', '2026-09-26'),
   ('org_y', 'y4', 'inbound', '2026-09-28'),
   ('org_y', 'y5', 'inbound', '2026-09-25'),
   ('org_y', 'y6', 'outbound', '2026-09-28'),
-  ('org_y', 'y7', 'inbound', '2026-09-25');
+  ('org_y', 'y7', 'inbound', '2026-09-25'),
+  ('org_y', 'y8', 'outbound', '2026-09-26'), ('org_y', 'y8', 'inbound', '2026-09-27');
 
 DO $$
 DECLARE r record; v1 text; v2 text; args record;
@@ -60,14 +71,15 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- 2. org_y by channel (as v1): email reached Y1, Y2, Y4, Y5, Y6, Y7 = 6, replied Y1, Y6, Y7 = 3, in the rate 3;
-  --    LinkedIn reached Y1, Y3, Y6 = 3, replied Y1, Y3, Y4, Y5, Y7 = 5, in the rate Y1, Y3 = 2.
+  -- 2. org_y by channel (as v1): email reached Y1, Y2, Y4, Y5, Y6, Y7, Y8 = 7, replied Y1, Y6, Y7 = 3, in the rate 3;
+  --    LinkedIn reached Y1, Y3, Y6, li:urn:y8 = 4, replied Y1, Y3, Y4, Y5, Y7, li:urn:y8 = 6, in the rate Y1, Y3, y8 = 3.
   SELECT string_agg(format('%s:%s/%s/%s', channel, people_reached, people_replied, reached_and_replied), ' ' ORDER BY channel)
     INTO v2 FROM public.dashboard_people_reply_rollup_v2('org_y', '2026-09-24', '2026-10-01');
-  -- 3. all: reached Y1 to Y7 = 7 (not 9: Y1 and Y6 are one person each); replied Y1, Y3, Y4, Y5, Y6, Y7 = 6 (not 8);
-  --    in the rate Y1, Y3, Y4 (its LinkedIn reply follows its email), Y6 (its first outreach is the email), Y7 (its
-  --    last reply follows its email) = 5; Y5's only reply came before any outreach.
-  IF v2 IS DISTINCT FROM 'all:7/6/5 email:6/3/3 linkedin:3/5/2' THEN
+  -- 3. all: reached Y1 to Y8 = 8 (not 11: Y1, Y6 and Y8 are one person each); replied Y1, Y3, Y4, Y5, Y6, Y7, Y8 = 7
+  --    (not 9); in the rate Y1, Y3, Y4 (its LinkedIn reply follows its email), Y6 (its first outreach is the email),
+  --    Y7 (its last reply follows its email), Y8 (matched by its LinkedIn id) = 6; Y5's only reply came before any
+  --    outreach. Y3 stays its own person (the contact with its LinkedIn id is another workspace's).
+  IF v2 IS DISTINCT FROM 'all:8/7/6 email:7/3/3 linkedin:4/6/3' THEN
     RAISE EXCEPTION 'org_y: got %', v2;
   END IF;
 

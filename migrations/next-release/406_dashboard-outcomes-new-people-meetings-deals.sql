@@ -16,8 +16,11 @@
 --     - A play that sends email from the start (channel_strategy NULL, 'email', 'mixed' or 'multi-channel') links a
 --       person through their company: at the LATER of the company joining the play (campaign_companies.created_at)
 --       and the person being created (contacts.created_at). Companies the play holds back (campaign_companies
---       .blocked_by_icp) link no one: Sellton never reaches out to them.
---     - Every play links the people it enrols (campaign_contacts.created_at): the LinkedIn plays' people.
+--       .blocked_by_icp) or the customer declined in review (campaign_companies.status 'rejected', the company
+--       verification route) link no one: Sellton never reaches out to them.
+--     - Every play links the people it enrols (campaign_contacts.created_at): the LinkedIn plays' people. Only people
+--       who still exist (campaign_contacts has no foreign key to contacts; a list delete keeps enrolment rows).
+--     - One person = the canonical contact (contacts.canonical_contact_id, 273: duplicates point at the survivor).
 --   Meeting (D71, D93): a deal that first reached Meeting booked or a later stage (Presentation, Negotiation,
 --     Agreement, Won) in the window, from its stage history (deal_activities: 'stage_change' metadata.to, or the
 --     stage it was created at, 'deal_created' metadata.stage). A deal that goes back and forth counts once, at its
@@ -26,6 +29,13 @@
 --     currency (deals.amount, deals.currency).
 --   "Just me" (p_user_id): new people = the plays I own (campaigns.user_id), as the dashboard scopes plays; meetings
 --     and deals = the deals I own (deals.owner_user_id).
+--
+-- Known limits:
+--   - The CRM deals rollout (reconcile_crm_deals_for_rollout, 350/360) created deals for existing contacts at their
+--     stage at that moment: their 'deal_created' rows carry the rollout's time, so the rollout day shows those
+--     meetings once. Later periods are exact.
+--   - New people read each person's links over all time (the first link must be known); measured at 174 ms for a
+--     150,000-person workspace, about 2 s at ten times that. An anti-join is the next step if such workspaces appear.
 --
 -- Returns one row:
 --   new_people bigint, meetings bigint, deals_won bigint,
@@ -62,11 +72,12 @@ AS $$
   ),
   links AS (
     -- Email plays: through the company, at the later of the company joining and the person being created (D87).
-    SELECT cct.contact_id AS person, GREATEST(cc.created_at, ct.created_at) AS linked_at
+    SELECT COALESCE(ct.canonical_contact_id, ct.id) AS person, GREATEST(cc.created_at, ct.created_at) AS linked_at
     FROM scoped_campaigns s
     JOIN public.campaign_companies cc
       ON cc.campaign_id = s.id
      AND COALESCE(cc.blocked_by_icp, false) = false
+     AND cc.status IS DISTINCT FROM 'rejected'
     JOIN public.company_contacts cct
       ON cct.company_id = cc.company_id
      AND cct.organization_id = p_org_id
@@ -76,10 +87,12 @@ AS $$
     WHERE COALESCE(s.channel_strategy, 'email') IN ('email', 'mixed', 'multi-channel')
     UNION ALL
     -- Every play: the people it enrols (the LinkedIn plays' people).
-    SELECT cp.contact_id, cp.created_at
+    SELECT COALESCE(ct.canonical_contact_id, ct.id), cp.created_at
     FROM scoped_campaigns s
     JOIN public.campaign_contacts cp ON cp.campaign_id = s.id
-    WHERE cp.contact_id IS NOT NULL
+    JOIN public.contacts ct
+      ON ct.id = cp.contact_id
+     AND ct.organization_id = p_org_id
   ),
   first_links AS (
     SELECT person, MIN(linked_at) AS first_linked_at FROM links GROUP BY person
