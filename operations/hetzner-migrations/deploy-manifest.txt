@@ -60,3 +60,7 @@ migrations/next-release/388_usage-display-categories.sql
 migrations/next-release/391_customer-requests.sql
 migrations/next-release/398_linkedin-thread-has-inbound.sql
 migrations/next-release/399_autonomous-offer-approval-counts.sql
+migrations/next-release/406_dashboard-outcomes-new-people-meetings-deals.sql
+migrations/next-release/407_dashboard-people-reply-rollup-v2.sql
+migrations/next-release/408_task-stats-counts-v2.sql
+migrations/next-release/409_organization-settings-timezone.sql
