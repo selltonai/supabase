@@ -70,3 +70,4 @@ migrations/next-release/405_bump-verification-digest.sql
 migrations/next-release/406_dashboard-outcomes-new-people-meetings-deals.sql
 migrations/next-release/407_dashboard-people-reply-rollup-v2.sql
 migrations/next-release/408_task-stats-counts-v2.sql
+migrations/next-release/409_organization-settings-timezone.sql
