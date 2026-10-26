@@ -272,7 +272,9 @@ CREATE TRIGGER play_list_after_campaign_update
 -- The same columns and paging as get_companies_by_campaign (210), for one CRM list. A list's
 -- companies are its members, the companies it owns (crm_list_id) and the companies extracted from
 -- its imported rows: the same set crm_list_delete_batch (400) works on. p_assigned_to_user_id
--- scopes the result to one owner, as the Companies route does for members.
+-- scopes the result to one owner, as the Companies route does for members. p_campaign_id keeps
+-- only the companies of one play: linked to it (campaign_companies) or in the play's own list
+-- (a phone play has no links, only its list).
 CREATE OR REPLACE FUNCTION public.get_companies_by_list(
   p_organization_id TEXT,
   p_list_id UUID,
@@ -282,7 +284,8 @@ CREATE OR REPLACE FUNCTION public.get_companies_by_list(
   p_sort_order TEXT DEFAULT 'asc',
   p_page INTEGER DEFAULT 1,
   p_limit INTEGER DEFAULT 50,
-  p_assigned_to_user_id TEXT DEFAULT NULL
+  p_assigned_to_user_id TEXT DEFAULT NULL,
+  p_campaign_id UUID DEFAULT NULL
 )
 RETURNS TABLE (
   id UUID,
@@ -345,6 +348,13 @@ BEGIN
     )
     AND (p_assigned_to_user_id IS NULL OR c.assigned_to_user_id = p_assigned_to_user_id)
     AND (
+      p_campaign_id IS NULL
+      OR EXISTS (SELECT 1 FROM public.campaign_companies cc
+                 WHERE cc.campaign_id = p_campaign_id AND cc.company_id = c.id AND cc.organization_id = p_organization_id)
+      OR EXISTS (SELECT 1 FROM public.crm_list_members pm JOIN public.crm_lists pl ON pl.id = pm.list_id
+                 WHERE pl.campaign_id = p_campaign_id AND pl.organization_id = p_organization_id AND pm.company_id = c.id)
+    )
+    AND (
       p_status IS NULL
       OR (p_status = 'approved' AND c.processing_status = 'approved' AND COALESCE(c.blocked_by_icp, false) = false)
       OR (p_status = 'processing' AND c.processing_status IN ('processing', 'pending'))
@@ -378,6 +388,13 @@ BEGIN
     )
     AND (p_assigned_to_user_id IS NULL OR c.assigned_to_user_id = p_assigned_to_user_id)
     AND (
+      p_campaign_id IS NULL
+      OR EXISTS (SELECT 1 FROM public.campaign_companies cc
+                 WHERE cc.campaign_id = p_campaign_id AND cc.company_id = c.id AND cc.organization_id = p_organization_id)
+      OR EXISTS (SELECT 1 FROM public.crm_list_members pm JOIN public.crm_lists pl ON pl.id = pm.list_id
+                 WHERE pl.campaign_id = p_campaign_id AND pl.organization_id = p_organization_id AND pm.company_id = c.id)
+    )
+    AND (
       p_status IS NULL
       OR (p_status = 'approved' AND c.processing_status = 'approved' AND COALESCE(c.blocked_by_icp, false) = false)
       OR (p_status = 'processing' AND c.processing_status IN ('processing', 'pending'))
@@ -398,13 +415,13 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION public.get_companies_by_list(text, uuid, text, text, text, text, integer, integer, text) IS
+COMMENT ON FUNCTION public.get_companies_by_list(text, uuid, text, text, text, text, integer, integer, text, uuid) IS
   'Companies page list filter: one page of a CRM list''s companies (members, owned, extracted), the columns of get_companies_by_campaign. Service role only (selltonai api/companies/route.ts).';
 
 -- 6. Grants: the functions are for the service role only (the 390 and 400 pattern) --------------
 
-REVOKE ALL ON FUNCTION public.get_companies_by_list(text, uuid, text, text, text, text, integer, integer, text) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.get_companies_by_list(text, uuid, text, text, text, text, integer, integer, text) TO service_role;
+REVOKE ALL ON FUNCTION public.get_companies_by_list(text, uuid, text, text, text, text, integer, integer, text, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.get_companies_by_list(text, uuid, text, text, text, text, integer, integer, text, uuid) TO service_role;
 
 REVOKE ALL ON FUNCTION public.add_play_list_members(text, uuid, uuid[], uuid[]) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.add_play_list_members(text, uuid, uuid[], uuid[]) TO service_role;
