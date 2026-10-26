@@ -12,6 +12,7 @@ DROP FUNCTION IF EXISTS public.play_list_after_contact_links();
 DROP FUNCTION IF EXISTS public.play_list_after_campaign_update();
 DROP FUNCTION IF EXISTS public.play_list_fill(text, uuid);
 DROP FUNCTION IF EXISTS public.add_play_list_members(text, uuid, uuid[], uuid[]);
+DROP FUNCTION IF EXISTS public.get_companies_by_list(text, uuid, text, text, text, text, integer, integer, text);
 
 UPDATE public.crm_list_members SET source = 'manual' WHERE source = 'play';
 ALTER TABLE public.crm_list_members
