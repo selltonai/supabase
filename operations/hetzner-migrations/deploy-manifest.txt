@@ -73,3 +73,4 @@ migrations/next-release/408_task-stats-counts-v2.sql
 migrations/next-release/409_organization-settings-timezone.sql
 migrations/next-release/410_companies-discovery-gate-verdict.sql
 migrations/next-release/411_crm-play-lists.sql
+migrations/next-release/412_discovery-verdict-cache.sql
