@@ -61,6 +61,8 @@ migrations/next-release/387_dashboard-people-and-campaign-channel-stats.sql
 migrations/next-release/388_usage-display-categories.sql
 migrations/next-release/389_remove_sellton_brain_database_webhooks.sql
 migrations/next-release/391_customer-requests.sql
+migrations/release_1.3.0/374_production-catch-up-usage-label-map.sql
+migrations/release_1.3.0/375_production-catch-up-contact-canonical-pointer.sql
 migrations/next-release/394_close-usage-tables-to-browser-key.sql
 migrations/next-release/395_usage-idempotency-and-batch-write.sql
 migrations/next-release/396_mobile-usage-on-usage-pages.sql
