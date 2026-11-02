@@ -76,3 +76,4 @@ migrations/next-release/411_crm-play-lists.sql
 migrations/next-release/412_discovery-verdict-cache.sql
 migrations/next-release/413_restore-dashboard-summary-rollup.sql
 migrations/next-release/414_organization-settings-send-window.sql
+migrations/next-release/415_crm-deal-goal-and-note-clock.sql
