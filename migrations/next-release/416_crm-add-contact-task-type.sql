@@ -1,0 +1,12 @@
+-- ============================================================
+-- Migration: 416_crm-add-contact-task-type
+-- Date:      2026-11-02
+-- Purpose:   CRM quiet deals, section 12 (PLAN_CRM_QUIET_DEALS_TASKS_2026_10_31.md): the "Add a person" task. The
+--            daily follow-up run gives a quiet deal whose company has no live person one task for the deal owner,
+--            and closes it once a person exists.
+-- Projects:  selltonai-database/supabase (owner); selltonai-modal writes the task (deal_nurture_service);
+--            selltonai shows it (Tasks, the deal).
+-- Contract:  One enum value. Committed before 417, which references it (as 375 before 376 for the call task).
+--            An enum value cannot be dropped, so this has no rollback; nothing writes it until Modal does.
+-- ============================================================
+ALTER TYPE public.task_type ADD VALUE IF NOT EXISTS 'add_contact';
