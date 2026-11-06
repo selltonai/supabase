@@ -79,3 +79,4 @@ migrations/next-release/414_organization-settings-send-window.sql
 migrations/next-release/415_crm-deal-goal-and-note-clock.sql
 migrations/next-release/416_crm-add-contact-task-type.sql
 migrations/next-release/417_crm-add-contact-task-workflows.sql
+migrations/next-release/418_learning-loop-tables.sql
