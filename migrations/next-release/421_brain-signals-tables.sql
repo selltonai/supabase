@@ -236,7 +236,7 @@ CREATE TABLE IF NOT EXISTS public.brain_signal_cursor (
 );
 
 COMMENT ON TABLE public.brain_signal_cursor IS
-  'The poll''s place in GET /v1/signals, one row per environment. next_after is Brain''s opaque cursor, sent back unchanged.';
+  'The poll''s place in GET /v1/signals, one row per environment. next_after is Brain''s opaque cursor, sent back unchanged. Rows keyed tidy:actively_hiring and history_mode:<organization id> are the same run''s own bookkeeping (the day of the last tidy, the history mode of the last run).';
 
 DROP TRIGGER IF EXISTS update_brain_signal_cursor_updated_at ON public.brain_signal_cursor;
 CREATE TRIGGER update_brain_signal_cursor_updated_at
