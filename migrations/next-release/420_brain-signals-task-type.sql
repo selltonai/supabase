@@ -1,0 +1,11 @@
+-- ============================================================
+-- Migration: 420_brain-signals-task-type
+-- Date:      2026-11-09
+-- Purpose:   Brain signals (PLAN_BRAIN_SIGNALS_2026_11_09_REV4.md section 3.1, gap G4): the task type for a signal on
+--            a company with no person to write to (a company only in a list, or CRM automation off).
+-- Projects:  selltonai-database/supabase (owner); selltonai-modal writes the task (the signal router);
+--            selltonai shows it (Tasks).
+-- Contract:  One enum value. Committed before 421 and on its own (as 416 before 417).
+--            An enum value cannot be dropped, so this has no rollback; nothing writes it until Modal does.
+-- ============================================================
+ALTER TYPE public.task_type ADD VALUE IF NOT EXISTS 'company_signal';

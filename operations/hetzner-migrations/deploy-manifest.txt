@@ -81,3 +81,5 @@ migrations/next-release/416_crm-add-contact-task-type.sql
 migrations/next-release/417_crm-add-contact-task-workflows.sql
 migrations/next-release/418_learning-loop-tables.sql
 migrations/next-release/419_campaign-lifecycle-statuses-replay-of-330.sql
+migrations/next-release/420_brain-signals-task-type.sql
+migrations/next-release/421_brain-signals-tables.sql
