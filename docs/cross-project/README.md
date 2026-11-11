@@ -256,6 +256,29 @@ null and no `billing_customers.card_brand/card_last4` exists. The optional
 `onboarding_reengagement_sends` for per-workspace/step idempotency and honor
 `email_suppressions` before delivery.
 
+Migration `next-release/422_backoffice-cs-agent-core.sql` widens `audience_mode` with `chase` (workspaces in a
+customer-success stage, each email approved as a `cs_recommendations` row) and `segment` (a group of workspaces
+approved as one batch), and adds the nullable `email_sequence_steps.signup_source` (`web` | `mobile`; NULL = no
+filter) so a step can be kept to workspaces created on the web or on the phone. Existing rows are unchanged.
+
+### Backoffice Customer Success Tables
+
+| Table | Primary Writer | Primary Readers | Purpose |
+|-------|---------------|-----------------|---------|
+| **cs_threads** | backoffice | backoffice | A staff user's chat thread with the customer-success agent, about all workspaces or one |
+| **cs_messages** | backoffice | backoffice | The messages of a thread, with what the agent read to answer |
+| **cs_briefs** | backoffice | backoffice | The morning brief, one row per day and scope (`global` or a workspace) |
+| **cs_recommendations** | backoffice | backoffice | What the agent or a staff user proposes for a workspace, its approval, execution and outcome |
+| **cs_costs** | backoffice | backoffice | The backoffice's own model and data spend, one row per call; never invoiced |
+
+Migration `next-release/422_backoffice-cs-agent-core.sql` adds these five tables. They are additive, RLS is on with
+no policies, and `anon` and `authenticated` hold no privileges: only the service role reads or writes. No other
+service reads them. `cs_recommendations` holds a row in `approved`, `executed` or `failed` only with `approved_by`
+and `approved_at` set, and `dedupe_key` (unique when set) keeps a proposal single per workspace, kind and period.
+`cs_costs` is not the customers' ledger: the backoffice writes no row to `usage`, which stays Modal's. Deleting an
+organization deletes its threads, messages, briefs and proposals; its cost rows stay with `organization_id` NULL.
+The contract runs on a disposable database with `tests/run-backoffice-cs-agent-core-contract.sh`.
+
 ---
 
 ## Schema Contracts
