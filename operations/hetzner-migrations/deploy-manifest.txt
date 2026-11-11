@@ -90,3 +90,4 @@ migrations/next-release/425_campaign-contacts-accepted-at.sql
 migrations/next-release/426_brain-signals-closed-deals-scope.sql
 migrations/next-release/427_backoffice-cs-agent-commercial.sql
 migrations/next-release/428_backoffice-cs-agent-deletion.sql
+migrations/next-release/429_backoffice-cs-agent-economics.sql
