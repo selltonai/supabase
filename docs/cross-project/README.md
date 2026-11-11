@@ -323,6 +323,22 @@ backoffice reads these tables until Modal's billing release, so nothing here cha
 organization deletes its rows; its `connection_ledger` rows stay with `organization_id` NULL. The contract runs on a
 disposable database with `tests/run-backoffice-cs-agent-commercial-contract.sh`.
 
+| Table | Primary Writer | Primary Readers | Purpose |
+|-------|---------------|-----------------|---------|
+| **workspace_deletions** | backoffice (the request and its own parts); selltonai-modal, the mobile service, the vector service and the gmail-api service each write only their own part's columns (their releases) | backoffice, and each of those services for its own part | A workspace archive or delete request, drained by every system for its part, and kept as the receipt |
+
+Migration `next-release/428_backoffice-cs-agent-deletion.sql` adds this table. It is additive, RLS is on with no
+policies, and `anon` and `authenticated` hold no privileges: only the service role reads or writes.
+`organization_id` is plain text with no foreign key, so the row outlives the organization it removed. `systems`
+lists the parts that apply (`supabase`, `pinecone`, `mongo`, `gmail_api`, `unipile`, `mobile`, `stripe`, `clerk`).
+A service claims a listed part by setting `<part>_claimed_at` and `<part>_claimed_by` where they are NULL (or the
+claim is stale), then writes `<part>_receipt`, a jsonb object with `status` `done`, `failed` or `skipped` and its
+counts and times; each part has its own columns, so services never overwrite each other's receipt. In `delete` mode
+no part is claimed before `purge_not_before` (at least 24 hours after `requested_at`). A request runs only once
+`confirmed_at` is set, and is `completed` only when every listed part is `done` or `skipped`. At most one open
+request (`pending`, `running`, `failed`) per organization. The contract runs on a disposable database with
+`tests/run-backoffice-cs-agent-deletion-contract.sh`.
+
 ---
 
 ## Schema Contracts
