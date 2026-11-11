@@ -84,3 +84,4 @@ migrations/next-release/419_campaign-lifecycle-statuses-replay-of-330.sql
 migrations/next-release/420_brain-signals-task-type.sql
 migrations/next-release/421_brain-signals-tables.sql
 migrations/next-release/422_backoffice-cs-agent-core.sql
+migrations/next-release/423_backoffice-cs-agent-facts.sql
