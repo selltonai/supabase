@@ -356,6 +356,22 @@ organization deletes its rows. `usage`, `billing_settings`, `billing_invoices`, 
 `connection_ledger` are read to fill it and are not changed. The contract runs on a disposable database with
 `tests/run-backoffice-cs-agent-economics-contract.sh`.
 
+| Function | Writer | Readers | Purpose |
+|-------|---------------|-----------------|---------|
+| **backoffice_cs_segment_inputs_v1()** (as 431 redefines it) | (read-only) | backoffice | The rollup of 423; its trial columns read an active trial allowance as the trial |
+| **backoffice_cs_workspace_facts_v1(p_org text)** (as 431 redefines it) | (read-only) | backoffice | The facts of 423; `billing.trial_*` read the same trial, `billing.trial_source` says which row, `billing.paying` has one definition |
+
+Migration `next-release/432_backoffice-cs-agent-trial-facts.sql` replaces the two functions of 423 with the same
+signatures and return types (CREATE OR REPLACE); no table, column, index or row changes, and both stay STABLE,
+SECURITY INVOKER, `search_path = public`, service role only. A workspace's trial is its own trial while it runs (the
+web trial in `billing_customers`, or for a phone-first workspace the phone trial in `org_seats`), else an active
+`workspace_allowances` row of kind `trial` (427), else its own trial as recorded. A workspace is paying when
+`organization.web_billing_started_at` or `mobile_billing_started_at` is set, when `billing_customers.billing_started_at`
+is set with status `active` or `past_due`, or when an invoice was paid in the last 60 days. The backoffice applies
+the same definitions when it grants terms and reads either shape, so this file and the backoffice build can ship in
+either order. The rollback restores 423's definitions exactly. The contract runs on a disposable database with
+`tests/run-backoffice-cs-agent-trial-facts-contract.sh`.
+
 ---
 
 ## Schema Contracts
