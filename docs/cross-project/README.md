@@ -279,6 +279,24 @@ and `approved_at` set, and `dedupe_key` (unique when set) keeps a proposal singl
 organization deletes its threads, messages, briefs and proposals; its cost rows stay with `organization_id` NULL.
 The contract runs on a disposable database with `tests/run-backoffice-cs-agent-core-contract.sh`.
 
+| Function / column | Writer | Readers | Purpose |
+|-------|---------------|-----------------|---------|
+| **backoffice_cs_segment_inputs_v1()** | (read-only) | backoffice | One row per organization with `deleted = false`: the lifecycle classifier's inputs |
+| **backoffice_cs_workspace_facts_v1(p_org text)** | (read-only) | backoffice | One workspace's facts as one jsonb object (aggregates and the workspace's own data) |
+| **user_profiles.last_seen_at** | selltonai, later the mobile service (their releases) | backoffice | When the person was last seen in the workspace, written at most hourly |
+| **user_profiles.consent_marketing_at** | selltonai, later the mobile service (their releases) | backoffice | When the person agreed to marketing email; NULL = no consent |
+
+Migration `next-release/423_backoffice-cs-agent-facts.sql` adds the two functions and the two nullable columns
+(`user_profiles` has one row per person and workspace, so both are per workspace). Both functions are STABLE,
+SECURITY INVOKER, `search_path = public`, and executable by the service role only. The rollup reads each source
+table once, grouped by `organization_id`; the facts read filters every table by the workspace. The facts never hold
+a prospect's name, a prospect's email address or a reply body; `segment` and `health_score` are null (the backoffice
+computes them). A human action is a task completed or created by a member of the workspace (`user_organizations`),
+a play created, or a file uploaded: rows written as `api`, NULL or by a non-member (support staff) do not count.
+Nothing writes the two columns in 423; until a writer ships, every member reads as never seen and without consent.
+The backoffice builds the same rows from the tables while the functions are missing. The contract runs on a
+disposable database with `tests/run-backoffice-cs-agent-facts-contract.sh`.
+
 ---
 
 ## Schema Contracts
