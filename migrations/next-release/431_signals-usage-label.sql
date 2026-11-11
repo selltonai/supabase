@@ -2,7 +2,7 @@
 -- Migration: 431_signals-usage-label
 -- Date:      2026-11-11
 -- Purpose:   Signals billing (Borce 2026-11-11): the web app's Brain signal charges show as "Signals" on the usage page
---            and on the invoice, as the phone's do since 396, and a signal counts as one unit.
+--            and on the invoice, and a signal counts as one unit.
 --              1. usage_analytics_projection_contribution (396): two additions, nothing else. In derived_task_label,
 --                 metadata.service brain_signals or brain_signal_router gives 'Signals' (it was 'LLM generation'). In the
 --                 units column, a brain_signals row (the poll's charge, one per new signal) counts 1; it had no
