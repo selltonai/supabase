@@ -297,6 +297,32 @@ Nothing writes the two columns in 423; until a writer ships, every member reads 
 The backoffice builds the same rows from the tables while the functions are missing. The contract runs on a
 disposable database with `tests/run-backoffice-cs-agent-facts-contract.sh`.
 
+| Table | Primary Writer | Primary Readers | Purpose |
+|-------|---------------|-----------------|---------|
+| **workspace_plans** | backoffice | backoffice; selltonai-modal later (its billing release) | A workspace's commercial plan (`self_serve`, `pilot`, `deployment`) with the deal's own fee, included usage, term, seats and success criteria |
+| **workspace_price_overrides** | backoffice | backoffice; selltonai-modal later (its billing release) | A price per workspace, or per person for a seat, for a price-list item (`billing_settings` key), as `value_usd` or `percent` off |
+| **workspace_allowances** | backoffice | backoffice | A usage limit (amount, end time, or both) the backoffice enforces through the work-access override, with its 15-minute job's spend and claim |
+| **seat_discounts** | backoffice | backoffice; selltonai-modal later (its billing release) | A time-boxed percent off a seat (`mobile_seat`, `web_seat`), per workspace or per person; never on usage |
+| **trial_policies** | backoffice | backoffice | The trial policy per door and segment; every change is a row |
+| **discount_policies** | backoffice | backoffice | The seat-discount policy per door, segment and product; every change is a row |
+| **connection_ledger** | backoffice (nightly, correctable by staff) | backoffice | Which person held which provider account from when to when, and its monthly cost |
+| **workspace_company_profile** | backoffice | backoffice | The company data held per workspace, and the signals watchlist (`watch`, `watch_reason`) |
+| **cs_customer_signals** | backoffice | backoffice | A Brain signal on a watched company, one row per `brain_signal_id`, with the agent's grade and who handled it |
+| **cs_brain_cursor** | backoffice | backoffice | The backoffice's own place in the Brain's signals feed, one row per environment (not `brain_signal_cursor`) |
+
+Migration `next-release/427_backoffice-cs-agent-commercial.sql` adds these ten tables. They are additive, RLS is on
+with no policies, and `anon` and `authenticated` hold no privileges: only the service role reads or writes. No price
+value changes and no `billing_settings` row is written. A plan, price override, allowance or seat discount reaches
+`active` (or a later state) only with `approved_by` and `approved_at`; a policy row is `current` (or `superseded`)
+only with `confirmed_by` and `confirmed_at`, and `mode = 'auto'` or `autonomy_enabled` needs its default terms. The
+trial and discount caps are CHECKs on the rows. The seed is one current `trial_policies` row per door (`web`,
+`mobile`) and one `discount_policies` row for the phone seat, with caps and `mode = 'manual'` only: no default terms.
+At most one active plan and one active allowance per workspace, and one active seat discount per workspace, product
+and person. `dedupe_key` (unique when set) makes an insert single, as on `cs_recommendations`. Nothing outside the
+backoffice reads these tables until Modal's billing release, so nothing here changes what is billed. Deleting an
+organization deletes its rows; its `connection_ledger` rows stay with `organization_id` NULL. The contract runs on a
+disposable database with `tests/run-backoffice-cs-agent-commercial-contract.sh`.
+
 ---
 
 ## Schema Contracts
