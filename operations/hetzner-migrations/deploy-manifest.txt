@@ -91,3 +91,4 @@ migrations/next-release/426_brain-signals-closed-deals-scope.sql
 migrations/next-release/427_backoffice-cs-agent-commercial.sql
 migrations/next-release/428_backoffice-cs-agent-deletion.sql
 migrations/next-release/429_task-stats-signal-drafts.sql
+migrations/next-release/430_backoffice-cs-agent-economics.sql
