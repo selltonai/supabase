@@ -356,6 +356,21 @@ organization deletes its rows. `usage`, `billing_settings`, `billing_invoices`, 
 `connection_ledger` are read to fill it and are not changed. The contract runs on a disposable database with
 `tests/run-backoffice-cs-agent-economics-contract.sh`.
 
+| Table | Primary Writer | Primary Readers | Purpose |
+|-------|---------------|-----------------|---------|
+| **cs_settings** | backoffice (a super admin, /cs/settings) | backoffice (the agent's model client) | Runtime settings of the customer-success agent, one row per key; first key `cs_llm_daily_usd_cap` |
+| **cs_settings_history** | the database (a trigger on cs_settings) | backoffice | Every insert, update and delete of a cs_settings row, append-only |
+
+Migration `next-release/433_backoffice-cs-agent-settings.sql` adds these two tables. They are additive, RLS is on with
+no policies, and `anon` and `authenticated` hold no table or function privileges: only the service role reads or
+writes. `cs_settings` has one row per `key` (`^[a-z][a-z0-9_]{0,79}$`) with a jsonb `value`, `updated_by` (the
+person's email, required), `updated_at` (set by the database on every write) and `reason`. The known key
+`cs_llm_daily_usd_cap` is a JSON number from 1 to 500: the agent's model spend cap per UTC day, in USD, over the
+backoffice's `CS_LLM_DAILY_USD_CAP`; the backoffice reads it at most once a minute. Nothing is seeded, so nothing
+changes until a super admin saves a value. A trigger writes every change to `cs_settings_history` (operation, old and
+new value, who, why, when), which refuses updates, deletes and truncate. The contract runs on a disposable database
+with `tests/run-backoffice-cs-agent-settings-contract.sh`.
+
 ---
 
 ## Schema Contracts
