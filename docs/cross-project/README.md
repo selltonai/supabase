@@ -339,6 +339,23 @@ no part is claimed before `purge_not_before` (at least 24 hours after `requested
 request (`pending`, `running`, `failed`) per organization. The contract runs on a disposable database with
 `tests/run-backoffice-cs-agent-deletion-contract.sh`.
 
+| Table | Primary Writer | Primary Readers | Purpose |
+|-------|---------------|-----------------|---------|
+| **workspace_economics** | backoffice (nightly) | backoffice | A workspace's (or one person's) revenue, costs, contribution and margin in one 4-week cycle, with the inputs they came from |
+
+Migration `next-release/430_backoffice-cs-agent-economics.sql` adds this table. It is additive, RLS is on with no
+policies, and `anon` and `authenticated` hold no privileges: only the service role reads or writes. One row per
+workspace (`user_id` NULL) and one per person (`user_id` set) for each cycle `[cycle_start, cycle_end)`: seat,
+workspace and usage revenue, the usage's original cost, the provider cost, the allocated infrastructure, the
+contribution and the margin percent, plus `inputs` (a jsonb object naming where each number came from) and
+`computed_at`. The backoffice computes every number; the table checks the arithmetic (`contribution_usd` is the
+revenue minus the costs, `margin_percent` is NULL without revenue) and that no revenue or cost is negative. Unique on
+(`organization_id`, coalesce(`user_id`, ''), `cycle_start`): `user_key` is that coalesce as a stored generated column,
+so the nightly upsert names `on_conflict=organization_id,user_key,cycle_start`; it is never written. Deleting an
+organization deletes its rows. `usage`, `billing_settings`, `billing_invoices`, `billing_credits` and
+`connection_ledger` are read to fill it and are not changed. The contract runs on a disposable database with
+`tests/run-backoffice-cs-agent-economics-contract.sh`.
+
 ---
 
 ## Schema Contracts
