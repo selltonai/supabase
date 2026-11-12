@@ -417,6 +417,15 @@ started, has a row) or `excluded` (a play on the rep's existing connections, or 
 company by inserting its row; the primary key (`request_id`, `company_id`) makes the claim atomic, so no company is
 paid for twice. A release (spend limit, AI Ark unavailable) deletes the row. Counts are counted from the rows.
 
+Since `next-release/437_campaigns-play-own-targeting.sql` a request closes only when every company has a row with
+`done_at` set (searched, failed or skipped). A released company has no row, so the request stays `pending` and a later
+run takes the company again; a row with `done_at` NULL older than Modal's stale window (30 minutes, above the cron's
+900 s timeout) is a claim whose run died, and Modal deletes it so the company is taken again. A row with `done_at` set
+is never taken again. 437 also adds `campaigns.play_own_targeting text[]` (NULL means none): which of `job_titles`,
+`company_size` and `regions` a play with an ICP profile set for itself on the edit page. The app's save route writes
+it; Modal reads it, and reads the old `campaigns.metadata.play_own_targeting` key only while the column is NULL. The
+migration copies the existing metadata values into the column once; the app no longer writes the key.
+
 ---
 
 ## Schema Contracts
