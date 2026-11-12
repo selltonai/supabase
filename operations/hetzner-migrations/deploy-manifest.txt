@@ -93,3 +93,4 @@ migrations/next-release/428_backoffice-cs-agent-deletion.sql
 migrations/next-release/429_task-stats-signal-drafts.sql
 migrations/next-release/430_backoffice-cs-agent-economics.sql
 migrations/next-release/431_signals-usage-label.sql
+migrations/next-release/432_backoffice-cs-agent-trial-facts.sql
