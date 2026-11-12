@@ -97,3 +97,4 @@ migrations/next-release/432_backoffice-cs-agent-trial-facts.sql
 migrations/next-release/433_backoffice-cs-agent-settings.sql
 migrations/next-release/434_backoffice-cs-agent-plan-facts.sql
 migrations/next-release/435_people-search-requests.sql
+migrations/next-release/437_campaigns-play-own-targeting.sql
