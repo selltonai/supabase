@@ -99,3 +99,4 @@ migrations/next-release/434_backoffice-cs-agent-plan-facts.sql
 migrations/next-release/435_people-search-requests.sql
 migrations/next-release/436_campaigns-play-plan-columns.sql
 migrations/next-release/437_campaigns-play-own-targeting.sql
+migrations/next-release/438_gtm-strategy-tables.sql
