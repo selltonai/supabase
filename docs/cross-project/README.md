@@ -358,8 +358,8 @@ organization deletes its rows. `usage`, `billing_settings`, `billing_invoices`, 
 
 | Function | Writer | Readers | Purpose |
 |-------|---------------|-----------------|---------|
-| **backoffice_cs_segment_inputs_v1()** (as 431 redefines it) | (read-only) | backoffice | The rollup of 423; its trial columns read an active trial allowance as the trial |
-| **backoffice_cs_workspace_facts_v1(p_org text)** (as 431 redefines it) | (read-only) | backoffice | The facts of 423; `billing.trial_*` read the same trial, `billing.trial_source` says which row, `billing.paying` has one definition |
+| **backoffice_cs_segment_inputs_v1()** (as 432 redefines it) | (read-only) | backoffice | The rollup of 423; its trial columns read an active trial allowance as the trial |
+| **backoffice_cs_workspace_facts_v1(p_org text)** (as 432 redefines it) | (read-only) | backoffice | The facts of 423; `billing.trial_*` read the same trial, `billing.trial_source` says which row, `billing.paying` has one definition |
 
 Migration `next-release/432_backoffice-cs-agent-trial-facts.sql` replaces the two functions of 423 with the same
 signatures and return types (CREATE OR REPLACE); no table, column, index or row changes, and both stay STABLE,
@@ -386,6 +386,23 @@ backoffice's `CS_LLM_DAILY_USD_CAP`; the backoffice reads it at most once a minu
 changes until a super admin saves a value. A trigger writes every change to `cs_settings_history` (operation, old and
 new value, who, why, when), which refuses updates, deletes and truncate. The contract runs on a disposable database
 with `tests/run-backoffice-cs-agent-settings-contract.sh`.
+
+| Function | Writer | Readers | Purpose |
+|-------|---------------|-----------------|---------|
+| **backoffice_cs_workspace_facts_v1(p_org text)** (as 434 redefines it) | (read-only) | backoffice | The facts of 432 and a new top-level key `plan`: the workspace's active pilot or deployment (`workspace_plans`, 427), or null |
+
+Migration `next-release/434_backoffice-cs-agent-plan-facts.sql` replaces the facts function of 432 with the same
+signature and return type (CREATE OR REPLACE); no table, column, index or row changes, it stays STABLE, SECURITY
+INVOKER, `search_path = public`, service role only, and `backoffice_cs_segment_inputs_v1()` is not touched. Every key
+432 returns is unchanged. `plan` is the `workspace_plans` row with status `active` and plan `pilot` or `deployment`
+(an active `self_serve` plan, or a plan proposed, converted, ended or cancelled, is null): `kind`, `status`
+(`active`), `term_start` and `term_end` (dates), `term_days` (`term_end - term_start`), `days_elapsed` (UTC days since
+`term_start`, at least 0; null without dates), `fee_usd`, `included_usage_usd` and `seats_included` as stored, and
+`success_criteria`, the stored object's entries whose value is a number (any other stored shape reads as `{}`). The
+backoffice's playbook reads it (a pilot behind its success criteria past half its term, a deployment three quarters
+through its term) and reads a missing `plan` as no plan, so this file and the backoffice build can ship in either
+order. The rollback restores 432's definition exactly. The contract runs on a disposable database with
+`tests/run-backoffice-cs-agent-plan-facts-contract.sh`.
 
 ---
 
