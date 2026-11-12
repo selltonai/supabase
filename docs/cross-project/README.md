@@ -404,6 +404,19 @@ through its term) and reads a missing `plan` as no plan, so this file and the ba
 order. The rollback restores 432's definition exactly. The contract runs on a disposable database with
 `tests/run-backoffice-cs-agent-plan-facts-contract.sh`.
 
+| Table | Primary Writer | Primary Readers | Purpose |
+|-------|---------------|-----------------|---------|
+| **people_search_requests** | selltonai (play save route), selltonai-modal (closes it) | selltonai-modal (people_research_cron) | Roles added to a launched play: one row per save, the added titles only |
+| **people_search_request_companies** | selltonai-modal (people_research_cron) | selltonai-modal | One company of a request: the claim before the search is paid for, then its outcome |
+
+Migration `next-release/435_people-search-requests.sql` adds these two tables. They are additive, RLS is on with no
+policies, and `anon` and `authenticated` hold no privileges: only the service role reads or writes. The roles queue
+used to live in `campaigns.metadata.people_search_pending`, which other writers overwrote. A request is `pending`
+until Modal closes it as `done` (every company in `company_ids`, the play's approved companies when its first run
+started, has a row) or `excluded` (a play on the rep's existing connections, or a cancelled play). Modal claims a
+company by inserting its row; the primary key (`request_id`, `company_id`) makes the claim atomic, so no company is
+paid for twice. A release (spend limit, AI Ark unavailable) deletes the row. Counts are counted from the rows.
+
 ---
 
 ## Schema Contracts
