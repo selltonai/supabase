@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration: 435_campaigns-play-plan-columns
+-- Migration: 436_campaigns-play-plan-columns
 -- Date:      2026-11-12
 -- Purpose:   Play plan (PLAN_PLAY_BRIEF_TO_SEQUENCE_2026_11_11.md, decisions of 2026-11-12): own storage for the play's
 --            conversation plan and the play's LinkedIn invitation lines. Today both sit as keys inside the
@@ -19,7 +19,7 @@
 -- Contract:  Additive only: two nullable columns, no default, no index, no constraint. No view, function or policy
 --            changes. Idempotent: ADD COLUMN IF NOT EXISTS; the backfill only touches rows where the column is null.
 --            Merge order: this PR (supabase), then the selltonai-modal play plan PR, then the selltonai app play plan PR.
--- Rollback:  rollback/435_campaigns-play-plan-columns.rollback.sql (drops the two columns; the keys in campaign_goal
+-- Rollback:  rollback/436_campaigns-play-plan-columns.rollback.sql (drops the two columns; the keys in campaign_goal
 --            still hold the data until the backend has removed them).
 -- ============================================================
 
@@ -30,9 +30,9 @@ ALTER TABLE public.campaigns
   ADD COLUMN IF NOT EXISTS note_lines jsonb;
 
 COMMENT ON COLUMN public.campaigns.conversation_plan IS
-  'The play''s conversation plan (JSON object), written by the backend when it reads the play''s brief. Null: no plan stored. Before 435 it lived in campaign_goal.conversation_plan.';
+  'The play''s conversation plan (JSON object), written by the backend when it reads the play''s brief. Null: no plan stored. Before 436 it lived in campaign_goal.conversation_plan.';
 COMMENT ON COLUMN public.campaigns.note_lines IS
-  'The play''s LinkedIn invitation lines (JSON object), written by the backend. Null: none stored. Before 435 they lived in campaign_goal.note_lines.';
+  'The play''s LinkedIn invitation lines (JSON object), written by the backend. Null: none stored. Before 436 they lived in campaign_goal.note_lines.';
 
 DO $$
 DECLARE
@@ -76,13 +76,13 @@ BEGIN
     WHERE table_schema = 'public' AND table_name = 'campaigns'
       AND column_name IN ('conversation_plan', 'note_lines') AND data_type = 'jsonb'
   ) <> 2 THEN
-    RAISE EXCEPTION '435: campaigns.conversation_plan and campaigns.note_lines (jsonb) are not both present';
+    RAISE EXCEPTION '436: campaigns.conversation_plan and campaigns.note_lines (jsonb) are not both present';
   END IF;
   IF EXISTS (
     SELECT 1 FROM pg_trigger
     WHERE tgrelid = 'public.campaigns'::regclass
       AND tgname = 'update_campaigns_updated_at' AND tgenabled = 'D'
   ) THEN
-    RAISE EXCEPTION '435: update_campaigns_updated_at was left disabled';
+    RAISE EXCEPTION '436: update_campaigns_updated_at was left disabled';
   END IF;
 END $$;
