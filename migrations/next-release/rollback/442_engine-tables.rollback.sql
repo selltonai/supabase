@@ -1,4 +1,4 @@
--- Reverses 430. Touches only the engine_* objects; the mobile_* ones are never involved.
+-- Reverses 442. Touches only the engine_* objects; the mobile_* ones are never involved.
 -- Lossy once rows exist: dropping the tables drops the engine's queue and its send counters. Check first:
 --   SELECT (SELECT count(*) FROM public.engine_actions) AS actions,
 --          (SELECT count(*) FROM public.engine_send_counters) AS counters;

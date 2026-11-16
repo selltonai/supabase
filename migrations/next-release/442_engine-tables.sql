@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration: 430_engine-tables (stage: next-release/430; renumber at promotion if 430 is taken)
+-- Migration: 442_engine-tables (stage: next-release/442; renumber at promotion if 442 is taken; was 430 until 2026-11-16)
 -- Date:      2026-11-11
 -- Status:    DRAFT by lane E (the engine) for Zoran's review (card D1-1). Not applied anywhere.
 -- Purpose:   The engine's own queue: three NEW, EMPTY objects beside the phone's mobile_* ones, as 379 made them.

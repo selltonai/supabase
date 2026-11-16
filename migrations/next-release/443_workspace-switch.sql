@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration: 431_workspace-switch (stage: next-release/431; renumber at promotion if 431 is taken)
+-- Migration: 443_workspace-switch (stage: next-release/443; renumber at promotion if 443 is taken; was 431 until 2026-11-16)
 -- Date:      2026-11-11
 -- Status:    DRAFT by lane E (the engine) for Zoran's review (card D1-2). Not applied anywhere.
 -- Purpose:   The switch that says which workspaces the new engine serves: one row per organization.
