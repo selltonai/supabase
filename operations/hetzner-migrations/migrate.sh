@@ -11,9 +11,9 @@ Usage:
   ./operations/hetzner-migrations/migrate.sh apply <stage|production> <migration.sql>... [--confirm-production]
 
 Environment overrides:
-  HETZNER_SSH_HOST        Default: 46.224.151.84
+  HETZNER_SSH_HOST        Default: 49.12.253.93 for stage, 46.224.151.84 for production
   HETZNER_SSH_USER        Default: root
-  HETZNER_SSH_KEY         Default: /home/systempro/.ssh/hetzner-api
+  HETZNER_SSH_KEY         Default: ~/.ssh/hetzner-core for stage (via ssh-agent), ~/.ssh/hetzner-api for production
   HETZNER_KNOWN_HOSTS     Default: operations/hetzner-migrations/known_hosts
   HETZNER_MIGRATION_ACTOR Audit label; defaults to local user and hostname
   HETZNER_PRODUCTION_BRANCH Default: main
@@ -81,9 +81,15 @@ done
 readonly SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly REPOSITORY_ROOT="$(cd "$SCRIPT_DIRECTORY/../.." && pwd)"
 readonly REMOTE_RUNNER="$SCRIPT_DIRECTORY/remote-runner.sh"
-readonly SSH_HOST="${HETZNER_SSH_HOST:-46.224.151.84}"
+# Stage moved to supa-backoffice-stage (49.12.253.93) on 2026-11-09; production stays on 46.224.151.84.
+# hetzner-core is the key authorized there (passphrase-protected: load it into an ssh-agent first).
+case "$TARGET_ENVIRONMENT" in
+  stage) default_ssh_host=49.12.253.93; default_ssh_key=/home/systempro/.ssh/hetzner-core ;;
+  *) default_ssh_host=46.224.151.84; default_ssh_key=/home/systempro/.ssh/hetzner-api ;;
+esac
+readonly SSH_HOST="${HETZNER_SSH_HOST:-$default_ssh_host}"
 readonly SSH_USER="${HETZNER_SSH_USER:-root}"
-readonly SSH_KEY="${HETZNER_SSH_KEY:-/home/systempro/.ssh/hetzner-api}"
+readonly SSH_KEY="${HETZNER_SSH_KEY:-$default_ssh_key}"
 readonly KNOWN_HOSTS="${HETZNER_KNOWN_HOSTS:-$SCRIPT_DIRECTORY/known_hosts}"
 readonly SOURCE_COMMIT="$(git -C "$REPOSITORY_ROOT" rev-parse HEAD)"
 readonly CURRENT_BRANCH="$(git -C "$REPOSITORY_ROOT" symbolic-ref --quiet --short HEAD || true)"
