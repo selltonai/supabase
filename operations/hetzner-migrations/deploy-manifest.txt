@@ -102,3 +102,4 @@ migrations/next-release/437_campaigns-play-own-targeting.sql
 migrations/next-release/438_gtm-strategy-tables.sql
 migrations/next-release/439_customer-requests-trial-extension.sql
 migrations/next-release/440_close-usage-rollup-and-week-snapshot-to-browser-key.sql
+migrations/next-release/441_brain-signals-finished-plays-scope.sql
