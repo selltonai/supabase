@@ -1,4 +1,4 @@
--- Reverses 432. Lossy once rows exist: chat lines and feedback are kept for improving Sellton, limits and pacing are
+-- Reverses 444. Lossy once rows exist: chat lines and feedback are kept for improving Sellton, limits and pacing are
 -- live state. Copy the tables first if they hold rows, and do not roll back while the engine reads them (after E-M1).
 SET LOCAL lock_timeout = '10s';
 DROP TABLE IF EXISTS public.engine_feedback;

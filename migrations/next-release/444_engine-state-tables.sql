@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration: 432_engine-state-tables (stage: next-release/432; renumber at promotion if 432 is taken)
+-- Migration: 444_engine-state-tables (stage: next-release/444; renumber at promotion if 444 is taken; was 432 until 2026-11-16)
 -- Date:      2026-11-11
 -- Status:    DRAFT by lane E (the engine) for Zoran's review (card D1-7, feeds E-M1). Not applied anywhere.
 -- Purpose:   What the engine keeps in files on its box today, as rows, so more than one process can share it:
@@ -11,12 +11,12 @@
 --            5. engine_feedback      each tester answer, one row each (FEEDBACK_PATH, a JSON line each)
 -- Naming:    `chat_lines` and `feedback` on the card became engine_chat_lines and engine_feedback: public.feedback
 --            already exists (the web's, release_1.0.0, other columns), and the engine_ prefix keeps all of the engine's
---            objects together (as 430).
+--            objects together (as 442).
 -- Projects:  sellton-new-engine (the only reader and writer). selltonai-mobile, selltonai, selltonai-modal,
 --            backoffice: none.
 -- Contract:  Additive. Five new, empty tables; nothing else changes and nothing in the engine writes to them until
 --            E-M1 moves its stores. Service role only: RLS on with no policies, and anon and authenticated get no
---            table privileges (as 428 and 431). Nothing here is read by the web.
+--            table privileges (as 428 and 443). Nothing here is read by the web.
 -- Depends:   public.organization.
 -- Rollback:  rollback/432_engine-state-tables.rollback.sql
 -- Re-apply:  idempotent (IF NOT EXISTS, OR REPLACE, DROP TRIGGER IF EXISTS); a second run changes nothing.
@@ -130,7 +130,7 @@ BEGIN
     EXECUTE format('DROP TRIGGER IF EXISTS %I ON public.%I', t || '_updated_at', t);
     EXECUTE format('CREATE TRIGGER %I BEFORE UPDATE ON public.%I FOR EACH ROW EXECUTE FUNCTION public.engine_set_updated_at()',
                    t || '_updated_at', t);
-    -- Access: the service role only (as 428 and 431). RLS on with no policies, on purpose.
+    -- Access: the service role only (as 428 and 443). RLS on with no policies, on purpose.
     EXECUTE format('REVOKE ALL ON TABLE public.%I FROM PUBLIC, anon, authenticated', t);
     EXECUTE format('GRANT ALL ON TABLE public.%I TO service_role', t);
     EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
