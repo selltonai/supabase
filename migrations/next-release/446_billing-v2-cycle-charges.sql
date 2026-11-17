@@ -31,8 +31,9 @@
 --            RLS on with no policies, and anon and authenticated get no table privileges.
 --            billing_allowance_deductions.allowance_id is a workspace_allowances id without a foreign key, so
 --            this file does not depend on 427 and 427's rollback is not blocked.
---            Not in this file: seat rows for members who have none (the plan's "seats for every member"); Modal
---            charges no cycle fee to a workspace that still has such a member.
+--            Not in this file: seat rows for members who have none (the plan's "seats for every member"). Modal
+--            bills such a member as a web seat under the key 'seat:member:<user id>', as weekly billing bills
+--            them today.
 -- Depends:   public.organization, public.billing_invoices (243), public.org_seats (306),
 --            public.update_updated_at_column() (release_1.0.0; last re-declared by 300). 382 (billing_settings,
 --            organization.billing_cycle_anchor) is read by Modal, not by this file.
@@ -91,8 +92,10 @@ ALTER TABLE public.org_seats
 -- start), which makes the whole cycle free of fees, and 'unbilled:<period_start date>' (that invoice week was
 -- not invoiced because the workspace has no card; amount_usd is what was not invoiced; Modal removes the row
 -- when the week is invoiced).
--- status: 'reserved' (written before the Stripe invoice), 'invoiced' (on billing_invoices row invoice_id),
--- 'waived' (nothing to pay: a marker, or a price of 0.00), 'unbilled' (the unbilled marker only).
+-- status: 'reserved' (written first; a run that dies here never reached Stripe, so Modal deletes the row after
+-- 30 minutes and the fee is free again), 'charging' (the run is at Stripe or writing the invoice record; never
+-- deleted automatically), 'invoiced' (on billing_invoices row invoice_id), 'waived' (nothing to pay: a marker,
+-- or a price of 0.00), 'unbilled' (the unbilled marker only).
 CREATE TABLE IF NOT EXISTS public.billing_cycle_charges (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id text NOT NULL REFERENCES public.organization(id) ON DELETE CASCADE,
@@ -103,7 +106,7 @@ CREATE TABLE IF NOT EXISTS public.billing_cycle_charges (
   weeks           integer NOT NULL CHECK (weeks BETWEEN 0 AND 4),
   amount_usd      numeric(10,2) NOT NULL CHECK (amount_usd >= 0),
   status          text NOT NULL DEFAULT 'reserved'
-    CHECK (status IN ('reserved', 'invoiced', 'waived', 'unbilled')),
+    CHECK (status IN ('reserved', 'charging', 'invoiced', 'waived', 'unbilled')),
   CONSTRAINT billing_cycle_charges_unbilled_check
     CHECK ((status = 'unbilled') = (charge_key LIKE 'unbilled:%')),
   invoice_id      uuid REFERENCES public.billing_invoices(id) ON DELETE SET NULL,
@@ -127,8 +130,9 @@ CREATE TRIGGER update_billing_cycle_charges_updated_at
 -- 'usage:<period_start date>' (the usage of the invoice week that starts then); on v1
 -- 'invoice:<period_start date>' (the whole weekly invoice: usage and the weekly fees).
 -- covers: 'fee', 'usage' or 'invoice'.
--- status: 'reserved' (written before the invoice record), 'applied' (on billing_invoices row invoice_id, whose
--- line items show it as action 'prepaid_limit'). Both count as spent.
+-- status: 'reserved' (written first; deleted by Modal after 30 minutes if the run died), 'charging' (the run
+-- is at Stripe or writing the invoice record), 'applied' (on billing_invoices row invoice_id, whose line items
+-- show it as action 'prepaid_limit'). All three count as spent.
 CREATE TABLE IF NOT EXISTS public.billing_allowance_deductions (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id text NOT NULL REFERENCES public.organization(id) ON DELETE CASCADE,
@@ -137,7 +141,7 @@ CREATE TABLE IF NOT EXISTS public.billing_allowance_deductions (
     CHECK (deduction_key ~ '^(fee:[0-9]{4}-[0-9]{2}-[0-9]{2}:.+|(usage|invoice):[0-9]{4}-[0-9]{2}-[0-9]{2})$'),
   covers          text NOT NULL CHECK (covers IN ('fee', 'usage', 'invoice')),
   amount_usd      numeric(12,2) NOT NULL CHECK (amount_usd > 0),
-  status          text NOT NULL DEFAULT 'reserved' CHECK (status IN ('reserved', 'applied')),
+  status          text NOT NULL DEFAULT 'reserved' CHECK (status IN ('reserved', 'charging', 'applied')),
   invoice_id      uuid REFERENCES public.billing_invoices(id) ON DELETE SET NULL,
   period_start    timestamptz NOT NULL,                            -- the invoice week it was deducted in
   created_at      timestamptz NOT NULL DEFAULT now(),

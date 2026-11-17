@@ -100,6 +100,12 @@ BEGIN
     RAISE EXCEPTION 'an unknown seat_kind was accepted on the ledger';
   EXCEPTION WHEN check_violation THEN NULL; END;
 
+  -- The step before Stripe: reserved rows become charging, in both tables.
+  UPDATE public.billing_cycle_charges SET status = 'charging'
+   WHERE organization_id = 'org_web' AND cycle_start = DATE '2026-11-30' AND charge_key = 'infrastructure';
+  UPDATE public.billing_cycle_charges SET status = 'reserved'
+   WHERE organization_id = 'org_web' AND cycle_start = DATE '2026-11-30' AND charge_key = 'infrastructure';
+
   -- 5. Marking a row invoiced, and what happens when the invoice row goes.
   INSERT INTO public.billing_invoices (organization_id, stripe_invoice_id, period_start, period_end)
   VALUES ('org_web', 'in_fixture_1', '2026-10-26', '2026-11-02') RETURNING id INTO inv;
@@ -131,6 +137,8 @@ BEGIN
   VALUES ('org_web', '22222222-2222-2222-2222-222222222222', 'usage:2026-10-26', 'usage', 12.34, '2026-10-26'),
          ('org_web', '33333333-3333-3333-3333-333333333333', 'usage:2026-10-26', 'usage', 1.00, '2026-10-26'),
          ('org_c', '44444444-4444-4444-4444-444444444444', 'invoice:2026-10-26', 'invoice', 12.00, '2026-10-26');
+  UPDATE public.billing_allowance_deductions SET status = 'charging' WHERE allowance_id = '44444444-4444-4444-4444-444444444444';
+  UPDATE public.billing_allowance_deductions SET status = 'applied' WHERE allowance_id = '44444444-4444-4444-4444-444444444444';
   IF (SELECT 500.00 - sum(amount_usd) FROM public.billing_allowance_deductions
        WHERE allowance_id = '22222222-2222-2222-2222-222222222222') <> 454.66 THEN
     RAISE EXCEPTION 'the remaining limit is not the amount minus the recorded deductions';
