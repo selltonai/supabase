@@ -53,7 +53,20 @@ BEGIN
   VALUES ('org_web', DATE '2026-11-30', 'infrastructure', 4, 33.00),
          ('org_c', DATE '2026-11-02', 'infrastructure', 4, 33.00),
          ('org_web', DATE '2026-11-02', 'seat:11111111-1111-1111-1111-111111111111:upgrade', 2, 1.50),
-         ('org_c', DATE '2026-11-02', 'waived:paused', 0, 0.00);
+         ('org_c', DATE '2026-11-02', 'waived:paused', 0, 0.00),
+         ('org_c', DATE '2026-11-02', 'seat:member:user_2abcDEF', 4, 15.00);
+  INSERT INTO public.billing_cycle_charges (organization_id, cycle_start, charge_key, weeks, amount_usd, status)
+  VALUES ('org_c', DATE '2026-11-02', 'unbilled:2026-11-02', 0, 58.00, 'unbilled');
+  BEGIN
+    INSERT INTO public.billing_cycle_charges (organization_id, cycle_start, charge_key, weeks, amount_usd, status)
+    VALUES ('org_c', DATE '2026-11-09', 'unbilled:2026-11-09', 0, 5.00, 'reserved');
+    RAISE EXCEPTION 'an unbilled marker was accepted with a charging status';
+  EXCEPTION WHEN check_violation THEN NULL; END;
+  BEGIN
+    INSERT INTO public.billing_cycle_charges (organization_id, cycle_start, charge_key, weeks, amount_usd, status)
+    VALUES ('org_c', DATE '2026-11-09', 'infrastructure', 4, 33.00, 'unbilled');
+    RAISE EXCEPTION 'a fee was accepted with status unbilled';
+  EXCEPTION WHEN check_violation THEN NULL; END;
 
   -- 4. What the ledger refuses.
   BEGIN
@@ -169,7 +182,7 @@ DO $$ BEGIN
   IF (SELECT billing_cohort FROM public.organization WHERE id = 'org_web') <> 'existing' THEN
     RAISE EXCEPTION 'a re-run of 446 reset billing_cohort';
   END IF;
-  IF (SELECT count(*) FROM public.billing_cycle_charges) <> 6
+  IF (SELECT count(*) FROM public.billing_cycle_charges) <> 8
      OR (SELECT count(*) FROM public.billing_allowance_deductions) <> 4 THEN
     RAISE EXCEPTION 'a re-run of 446 changed the ledger or the deductions';
   END IF;

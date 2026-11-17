@@ -86,20 +86,26 @@ ALTER TABLE public.org_seats
 
 -- 3. The ledger -----------------------------------------------------------------------------------------
 -- charge_key: 'infrastructure', 'seat:<org_seats.id>', 'seat:<org_seats.id>:upgrade' (phone to web inside the
--- cycle), or the marker with no money 'waived:paused' (fees paused at the cycle start), which makes the whole
--- cycle free of fees.
+-- cycle), 'seat:member:<user id>' (a member of the workspace who has no org_seats row, billed as a web seat as
+-- weekly billing bills them today), or a marker with no money: 'waived:paused' (fees paused at the cycle
+-- start), which makes the whole cycle free of fees, and 'unbilled:<period_start date>' (that invoice week was
+-- not invoiced because the workspace has no card; amount_usd is what was not invoiced; Modal removes the row
+-- when the week is invoiced).
 -- status: 'reserved' (written before the Stripe invoice), 'invoiced' (on billing_invoices row invoice_id),
--- 'waived' (nothing to pay: a marker, or a price of 0.00).
+-- 'waived' (nothing to pay: a marker, or a price of 0.00), 'unbilled' (the unbilled marker only).
 CREATE TABLE IF NOT EXISTS public.billing_cycle_charges (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id text NOT NULL REFERENCES public.organization(id) ON DELETE CASCADE,
   cycle_start     date NOT NULL CHECK (extract(isodow FROM cycle_start) = 1),   -- a Monday
   charge_key      text NOT NULL
-    CHECK (charge_key ~ '^(infrastructure|seat:[^:]+(:upgrade)?|waived:paused)$'),
+    CHECK (charge_key ~ '^(infrastructure|seat:[^:]+(:upgrade)?|seat:member:[^:]+|waived:paused|unbilled:[0-9]{4}-[0-9]{2}-[0-9]{2})$'),
   seat_kind       text CHECK (seat_kind IS NULL OR seat_kind IN ('web', 'phone')),
   weeks           integer NOT NULL CHECK (weeks BETWEEN 0 AND 4),
   amount_usd      numeric(10,2) NOT NULL CHECK (amount_usd >= 0),
-  status          text NOT NULL DEFAULT 'reserved' CHECK (status IN ('reserved', 'invoiced', 'waived')),
+  status          text NOT NULL DEFAULT 'reserved'
+    CHECK (status IN ('reserved', 'invoiced', 'waived', 'unbilled')),
+  CONSTRAINT billing_cycle_charges_unbilled_check
+    CHECK ((status = 'unbilled') = (charge_key LIKE 'unbilled:%')),
   invoice_id      uuid REFERENCES public.billing_invoices(id) ON DELETE SET NULL,
   created_at      timestamptz NOT NULL DEFAULT now(),
   updated_at      timestamptz NOT NULL DEFAULT now(),
