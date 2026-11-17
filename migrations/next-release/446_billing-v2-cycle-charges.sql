@@ -3,10 +3,12 @@
 -- Date:      2026-11-17
 -- Purpose:   Billing v2 (PLAN_BILLING_V2_DELIVERY_2026_10_26, section 3.1): the 4-week cycle with fees charged
 --            upfront.
---            1. organization.billing_model: the workspace's billing cohort, decided once by Modal and never
---               changed by it: 'v1' (today's weekly fees, every workspace whose billing started before Modal's
---               BILLING_V2_FROM) or 'v2' (the cycle, a workspace whose billing starts at or after it). NULL: not
---               decided yet.
+--            1. organization.billing_cohort: the workspace's price cohort, decided once by Modal and never
+--               changed by it: 'existing' (billing started before Modal's BILLING_V2_FROM: today's price) or
+--               'new' (billing starts at or after it: the list price in billing_settings). NULL: not decided
+--               yet. It decides the price only; once Modal's switch is on, every workspace is on the cycle.
+--               Modal stores it together with organization.billing_cycle_anchor (382), the Monday the
+--               workspace's first cycle starts.
 --            2. org_seats.seat_kind ('web' or 'phone'), seat_kind_changed_at, seat_kind_changed_by.
 --            3. billing_cycle_charges: the ledger, one row per fee per cycle, with a unique key on
 --               (organization_id, cycle_start, charge_key) so a fee is never charged twice even if a job runs
@@ -15,14 +17,14 @@
 --               pilot, prepaid or goodwill, 427) has paid for: on v2 one row per fee and per usage week, on v1
 --               one row per weekly invoice, with a unique key on (allowance_id, deduction_key). The limit's remaining amount is always
 --               workspace_allowances.amount_usd minus the sum of amount_usd here for that allowance_id.
--- Projects:  selltonai-database/supabase (owner). selltonai-modal reads billing_model, billing_cycle_anchor (382),
---            seat_kind and reads and writes billing_model, billing_cycle_charges and
+-- Projects:  selltonai-database/supabase (owner). selltonai-modal reads seat_kind and reads and writes
+--            billing_cohort, billing_cycle_anchor (382), billing_cycle_charges and
 --            billing_allowance_deductions, only with its env setting BILLING_V2_FROM set. backoffice later: shows
 --            the ledger, and shows billing_allowance_deductions as what a prepaid limit has spent
 --            (organization_id, allowance_id, amount_usd, covers, deduction_key, period_start, created_at).
 --            selltonai later: writes seat_kind on the Team page. The mobile service and the engine: none.
--- Contract:  Additive. Two new tables, one column on organization, three on org_seats. billing_model is NULL for
---            every existing workspace until Modal decides it; every existing seat is 'web', except the seats of workspaces that signed up on the phone
+-- Contract:  Additive. Two new tables, one column on organization, three on org_seats. billing_cohort is NULL for
+--            every workspace until Modal decides it; every existing seat is 'web', except the seats of workspaces that signed up on the phone
 --            (organization.signup_source = 'mobile', when that column exists), which are 'phone'; that backfill
 --            runs once, with the column. Nothing reads the new objects until Modal's BILLING_V2_FROM is set, so
 --            applying this changes no invoice. Re-running it is a no-op. Both new tables are service role only:
@@ -35,8 +37,8 @@
 --            public.update_updated_at_column() (release_1.0.0; last re-declared by 300). 382 (billing_settings,
 --            organization.billing_cycle_anchor) is read by Modal, not by this file.
 -- Deploy:    This migration first, then Modal (Modal tolerates the reverse order: with BILLING_V2_FROM unset it
---            reads nothing new; with it set and the objects missing it bills a new workspace nothing and logs
---            the error, and bills every workspace that started before the cutover as today).
+--            reads nothing new; with it set and the objects missing it bills nothing and logs the error for
+--            every workspace, so never set it before this file is applied).
 -- Rollback:  rollback/446_billing-v2-cycle-charges.rollback.sql
 -- ============================================================
 
@@ -46,8 +48,9 @@ SET LOCAL lock_timeout = '10s';
 
 -- 1. The cohort per workspace ---------------------------------------------------------------------------
 ALTER TABLE public.organization
-  ADD COLUMN IF NOT EXISTS billing_model text
-    CONSTRAINT organization_billing_model_check CHECK (billing_model IS NULL OR billing_model IN ('v1', 'v2'));
+  ADD COLUMN IF NOT EXISTS billing_cohort text
+    CONSTRAINT organization_billing_cohort_check
+      CHECK (billing_cohort IS NULL OR billing_cohort IN ('existing', 'new'));
 
 -- 2. Seat kind ------------------------------------------------------------------------------------------
 -- The column and its one-time backfill go together: a re-run must never turn a seat back to 'phone' after the
@@ -154,11 +157,11 @@ ALTER TABLE public.billing_cycle_charges ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.billing_allowance_deductions ENABLE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE public.billing_cycle_charges IS
-  'Billing v2 ledger: one row per fee per 4-week cycle (infrastructure, seat:<id>, seat:<id>:upgrade, or a waived:* marker). UNIQUE (organization_id, cycle_start, charge_key) is what stops a double charge. Written by Modal with the service role only.';
+  'Billing cycle ledger: one row per fee per 4-week cycle (infrastructure, seat:<id>, seat:<id>:upgrade, or a waived:* marker). UNIQUE (organization_id, cycle_start, charge_key) is what stops a double charge. Written by Modal with the service role only.';
 COMMENT ON TABLE public.billing_allowance_deductions IS
   'Billing: what a grant (workspace_allowances kind pilot, prepaid or goodwill) has paid for: per fee and usage week on v2, per weekly invoice on v1. Remaining limit = workspace_allowances.amount_usd minus sum(amount_usd) for the allowance_id. UNIQUE (allowance_id, deduction_key) stops a double deduction. Written by Modal with the service role only.';
-COMMENT ON COLUMN public.organization.billing_model IS
-  'Billing cohort, decided once by Modal: v1 (weekly fees in arrears, billing started before BILLING_V2_FROM) or v2 (4-week cycle, fees upfront). NULL: not decided yet.';
+COMMENT ON COLUMN public.organization.billing_cohort IS
+  'Price cohort, decided once by Modal with billing_cycle_anchor: existing (billing started before BILLING_V2_FROM, today''s price) or new (the list price in billing_settings). NULL: not decided yet. Decides the price only, never the schedule.';
 COMMENT ON COLUMN public.org_seats.seat_kind IS
   'web | phone. Sets the 4-week seat price (billing_settings seat_web_4w_usd, seat_mobile_4w_usd) in billing v2.';
 
@@ -181,7 +184,7 @@ BEGIN
 END $$;
 
 -- Verify (read-only):
--- select billing_model, count(*) from public.organization group by 1;            -- NULL only
+-- select billing_cohort, count(*) from public.organization group by 1;           -- NULL only
 -- select seat_kind, count(*) from public.org_seats group by 1;                   -- web, and phone for mobile signups
 -- select relname, relrowsecurity from pg_class
 --  where relname in ('billing_cycle_charges', 'billing_allowance_deductions');   -- two rows, both true

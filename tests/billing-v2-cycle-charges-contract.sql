@@ -4,14 +4,15 @@
 DO $$
 DECLARE r record; n integer; inv uuid; t text;
 BEGIN
-  -- 1. No existing workspace has a cohort yet; only v1 and v2 are accepted.
-  IF (SELECT count(*) FROM public.organization WHERE billing_model IS NOT NULL) <> 0 THEN
-    RAISE EXCEPTION 'an existing workspace already has a billing_model';
+  -- 1. No workspace has a cohort yet; only existing and new are accepted.
+  IF (SELECT count(*) FROM public.organization WHERE billing_cohort IS NOT NULL) <> 0 THEN
+    RAISE EXCEPTION 'an existing workspace already has a billing_cohort';
   END IF;
-  UPDATE public.organization SET billing_model = 'v2' WHERE id = 'org_web';
+  UPDATE public.organization SET billing_cohort = 'existing' WHERE id = 'org_web';
+  UPDATE public.organization SET billing_cohort = 'new' WHERE id = 'org_phone';
   BEGIN
-    UPDATE public.organization SET billing_model = 'v3' WHERE id = 'org_c';
-    RAISE EXCEPTION 'an unknown billing_model was accepted';
+    UPDATE public.organization SET billing_cohort = 'v1' WHERE id = 'org_c';
+    RAISE EXCEPTION 'an unknown billing_cohort was accepted';
   EXCEPTION WHEN check_violation THEN NULL; END;
 
   -- 2. Seat kind: phone for the mobile signup's seats, web for the rest; the second run of 446 changed nothing.
@@ -165,8 +166,8 @@ DO $$ BEGIN
   IF (SELECT seat_kind FROM public.org_seats WHERE clerk_user_id = 'user_p1') <> 'web' THEN
     RAISE EXCEPTION 'a re-run of 446 turned a changed seat back to phone';
   END IF;
-  IF (SELECT billing_model FROM public.organization WHERE id = 'org_web') <> 'v2' THEN
-    RAISE EXCEPTION 'a re-run of 446 reset billing_model';
+  IF (SELECT billing_cohort FROM public.organization WHERE id = 'org_web') <> 'existing' THEN
+    RAISE EXCEPTION 'a re-run of 446 reset billing_cohort';
   END IF;
   IF (SELECT count(*) FROM public.billing_cycle_charges) <> 6
      OR (SELECT count(*) FROM public.billing_allowance_deductions) <> 4 THEN
@@ -183,7 +184,7 @@ DO $$ BEGIN
     RAISE EXCEPTION 'rollback left a table';
   END IF;
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public'
-              AND ((table_name = 'organization' AND column_name = 'billing_model')
+              AND ((table_name = 'organization' AND column_name = 'billing_cohort')
                 OR (table_name = 'org_seats' AND column_name LIKE 'seat_kind%'))) THEN
     RAISE EXCEPTION 'rollback left a column';
   END IF;
@@ -193,7 +194,7 @@ DO $$ BEGIN
 END $$;
 \i migrations/next-release/446_billing-v2-cycle-charges.sql
 DO $$ BEGIN
-  IF (SELECT count(*) FROM public.organization WHERE billing_model IS NULL) <> 3 THEN
+  IF (SELECT count(*) FROM public.organization WHERE billing_cohort IS NULL) <> 3 THEN
     RAISE EXCEPTION '446 after the rollback did not leave every workspace undecided';
   END IF;
 END $$;
