@@ -115,7 +115,8 @@ BEGIN
   INSERT INTO public.billing_allowance_deductions
     (organization_id, allowance_id, deduction_key, covers, amount_usd, period_start)
   VALUES ('org_web', '22222222-2222-2222-2222-222222222222', 'usage:2026-10-26', 'usage', 12.34, '2026-10-26'),
-         ('org_web', '33333333-3333-3333-3333-333333333333', 'usage:2026-10-26', 'usage', 1.00, '2026-10-26');
+         ('org_web', '33333333-3333-3333-3333-333333333333', 'usage:2026-10-26', 'usage', 1.00, '2026-10-26'),
+         ('org_c', '44444444-4444-4444-4444-444444444444', 'invoice:2026-10-26', 'invoice', 12.00, '2026-10-26');
   IF (SELECT 500.00 - sum(amount_usd) FROM public.billing_allowance_deductions
        WHERE allowance_id = '22222222-2222-2222-2222-222222222222') <> 454.66 THEN
     RAISE EXCEPTION 'the remaining limit is not the amount minus the recorded deductions';
@@ -168,7 +169,7 @@ DO $$ BEGIN
     RAISE EXCEPTION 'a re-run of 446 reset billing_model';
   END IF;
   IF (SELECT count(*) FROM public.billing_cycle_charges) <> 6
-     OR (SELECT count(*) FROM public.billing_allowance_deductions) <> 3 THEN
+     OR (SELECT count(*) FROM public.billing_allowance_deductions) <> 4 THEN
     RAISE EXCEPTION 'a re-run of 446 changed the ledger or the deductions';
   END IF;
 END $$;

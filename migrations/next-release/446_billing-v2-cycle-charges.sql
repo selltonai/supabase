@@ -11,9 +11,9 @@
 --            3. billing_cycle_charges: the ledger, one row per fee per cycle, with a unique key on
 --               (organization_id, cycle_start, charge_key) so a fee is never charged twice even if a job runs
 --               twice.
---            4. billing_allowance_deductions: what a workspace's prepaid limit (a workspace_allowances row of
---               kind pilot or prepaid, 427) has paid for: one row per fee or per usage week, with a unique key
---               on (allowance_id, deduction_key). The limit's remaining amount is always
+--            4. billing_allowance_deductions: what a workspace's grant (a workspace_allowances row of kind
+--               pilot, prepaid or goodwill, 427) has paid for: on v2 one row per fee and per usage week, on v1
+--               one row per weekly invoice, with a unique key on (allowance_id, deduction_key). The limit's remaining amount is always
 --               workspace_allowances.amount_usd minus the sum of amount_usd here for that allowance_id.
 -- Projects:  selltonai-database/supabase (owner). selltonai-modal reads billing_model, billing_cycle_anchor (382),
 --            seat_kind and reads and writes billing_model, billing_cycle_charges and
@@ -114,8 +114,10 @@ CREATE TRIGGER update_billing_cycle_charges_updated_at
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 -- 4. What a prepaid limit has paid for -------------------------------------------------------------------
--- deduction_key: 'fee:<cycle_start>:<charge_key>' (a billing_cycle_charges fee) or 'usage:<period_start date>'
--- (the usage of the invoice week that starts then). covers: 'fee' or 'usage'.
+-- deduction_key: on v2 'fee:<cycle_start>:<charge_key>' (a billing_cycle_charges fee) or
+-- 'usage:<period_start date>' (the usage of the invoice week that starts then); on v1
+-- 'invoice:<period_start date>' (the whole weekly invoice: usage and the weekly fees).
+-- covers: 'fee', 'usage' or 'invoice'.
 -- status: 'reserved' (written before the invoice record), 'applied' (on billing_invoices row invoice_id, whose
 -- line items show it as action 'prepaid_limit'). Both count as spent.
 CREATE TABLE IF NOT EXISTS public.billing_allowance_deductions (
@@ -123,8 +125,8 @@ CREATE TABLE IF NOT EXISTS public.billing_allowance_deductions (
   organization_id text NOT NULL REFERENCES public.organization(id) ON DELETE CASCADE,
   allowance_id    uuid NOT NULL,                                   -- workspace_allowances.id (427), no key
   deduction_key   text NOT NULL
-    CHECK (deduction_key ~ '^(fee:[0-9]{4}-[0-9]{2}-[0-9]{2}:.+|usage:[0-9]{4}-[0-9]{2}-[0-9]{2})$'),
-  covers          text NOT NULL CHECK (covers IN ('fee', 'usage')),
+    CHECK (deduction_key ~ '^(fee:[0-9]{4}-[0-9]{2}-[0-9]{2}:.+|(usage|invoice):[0-9]{4}-[0-9]{2}-[0-9]{2})$'),
+  covers          text NOT NULL CHECK (covers IN ('fee', 'usage', 'invoice')),
   amount_usd      numeric(12,2) NOT NULL CHECK (amount_usd > 0),
   status          text NOT NULL DEFAULT 'reserved' CHECK (status IN ('reserved', 'applied')),
   invoice_id      uuid REFERENCES public.billing_invoices(id) ON DELETE SET NULL,
@@ -154,7 +156,7 @@ ALTER TABLE public.billing_allowance_deductions ENABLE ROW LEVEL SECURITY;
 COMMENT ON TABLE public.billing_cycle_charges IS
   'Billing v2 ledger: one row per fee per 4-week cycle (infrastructure, seat:<id>, seat:<id>:upgrade, or a waived:* marker). UNIQUE (organization_id, cycle_start, charge_key) is what stops a double charge. Written by Modal with the service role only.';
 COMMENT ON TABLE public.billing_allowance_deductions IS
-  'Billing v2: what a prepaid limit (workspace_allowances kind pilot or prepaid) has paid for, one row per fee or usage week. Remaining limit = workspace_allowances.amount_usd minus sum(amount_usd) for the allowance_id. UNIQUE (allowance_id, deduction_key) stops a double deduction. Written by Modal with the service role only.';
+  'Billing: what a grant (workspace_allowances kind pilot, prepaid or goodwill) has paid for: per fee and usage week on v2, per weekly invoice on v1. Remaining limit = workspace_allowances.amount_usd minus sum(amount_usd) for the allowance_id. UNIQUE (allowance_id, deduction_key) stops a double deduction. Written by Modal with the service role only.';
 COMMENT ON COLUMN public.organization.billing_model IS
   'Billing cohort, decided once by Modal: v1 (weekly fees in arrears, billing started before BILLING_V2_FROM) or v2 (4-week cycle, fees upfront). NULL: not decided yet.';
 COMMENT ON COLUMN public.org_seats.seat_kind IS
