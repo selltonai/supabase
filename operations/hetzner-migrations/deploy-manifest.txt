@@ -103,3 +103,4 @@ migrations/next-release/438_gtm-strategy-tables.sql
 migrations/next-release/439_customer-requests-trial-extension.sql
 migrations/next-release/440_close-usage-rollup-and-week-snapshot-to-browser-key.sql
 migrations/next-release/441_brain-signals-finished-plays-scope.sql
+migrations/next-release/445_gtm-strategy-play-own-connections.sql
