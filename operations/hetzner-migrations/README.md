@@ -87,8 +87,9 @@ checkout does not need an `operations/` directory: each run uploads an exact tem
 the server retains successful artifacts under the environment runtime path.
 
 Configure the `stage` and `production` GitHub Environments in this repository with the
-`HETZNER_SSH_PRIVATE_KEY` secret. Optional `HETZNER_SSH_HOST` and `HETZNER_SSH_USER` environment
-variables override the checked-in defaults. A host override must have a matching entry in the
+`HETZNER_SSH_PRIVATE_KEY` secret. The checked-in default host is `49.12.253.93` for `stage` (since
+2026-11-09) and `46.224.151.84` for `main`; the `stage` key must be authorized for `root` on 49.12.253.93.
+Optional `HETZNER_SSH_HOST` and `HETZNER_SSH_USER` environment variables override the defaults. A host override must have a matching entry in the
 committed `operations/hetzner-migrations/known_hosts` file; the workflow fails before upload when the
 pinned key is missing. Production Environment approval rules can be enabled in GitHub without
 changing the workflow.
@@ -105,3 +106,48 @@ For each future migration:
    that main-relative path to the main manifest.
 3. Push `main` only after stage verification. Never reorder or remove previously deployed entries
    from either branch-local manifest.
+
+## Stage server (supa-backoffice-stage, 49.12.253.93)
+
+Stage Supabase moved off the production server on 2026-11-09 (same container names, paths and keys; the old copy on
+46.224.151.84 is stopped, not deleted). `migrate.sh ... stage` now goes there by default with `~/.ssh/hetzner-core`
+(through an ssh-agent); production keeps 46.224.151.84 and `~/.ssh/hetzner-api`.
+
+| Server | IP | What runs there | Public name |
+|---|---|---|---|
+| `sellton-vercel-stage` | 2.28.196.242 | selltonai `stage` (`/var/www/selltonai`) | https://stage-ver.sellton.ai |
+| `selltonai-modal-stage` | 2.31.85.36 | selltonai-modal `stage` (`/opt/sellton-modal`) and selltonai-vector-api `stage` (`/opt/sellton-vector-api`, internal: `http://vector-api:8000`) | https://stage-mod.sellton.ai |
+| `supa-backoffice-stage` | 49.12.253.93 | Supabase stage, MongoDB stage, Gmail API stage, Caddy | https://supabase-stage.sellton.ai, https://gmail-api.sellton.ai |
+| `selltonai-main` | 46.224.151.84 | **production** (`storagedb`, `emailapi`, production MongoDB, backoffice `portal`) | not from a session |
+
+**Connect:** `ssh root@49.12.253.93` with `~/.ssh/hetzner-core` (passphrase: a person loads it once with
+`ssh-agent -a ~/.ssh/claude-agent.sock` and `SSH_AUTH_SOCK=~/.ssh/claude-agent.sock ssh-add ~/.ssh/hetzner-core`;
+an agent then runs `SSH_AUTH_SOCK=~/.ssh/claude-agent.sock ssh -o BatchMode=yes root@49.12.253.93 '...'`).
+
+**Rules (agents):** schema changes only through `migrate.sh` (plan and status are read-only); never print a key or a
+password (names with `cut -d= -f1`); back up a file before editing it; nothing on 46.224.151.84 (production) from a
+session; never delete `volumes/db/data` or the `supabase-stage_db-config` volume (it holds `pgsodium_root.key`,
+without which Vault values cannot be read).
+
+| What | Where |
+|---|---|
+| Compose project | `/opt/sellton/supabase-stage` (`docker-compose.yml`, `.env` mode 600, `volumes/`) |
+| Database | container `supabase-stage-db` (supabase/postgres 15.8), data in `volumes/db/data`, `127.0.0.1:55322`; pooler `127.0.0.1:55324` |
+| API gateway | `supabase-stage-kong`, `127.0.0.1:55321`; public https://supabase-stage.sellton.ai through Caddy (`/opt/sellton/proxy`, `sites/supabase-stage.caddy`) |
+| App keys (anon, service role) | `/opt/sellton/supabase-stage/app-env.local.txt` (root only; unchanged by the move) |
+| Applied-migrations ledger | table `sellton_migrations.applied_migrations`; artifacts in `migrations-applied/` |
+| Migration backups | `/opt/sellton/backups/database-migrations/stage` (made by the runner before each apply) |
+
+```bash
+# read-only SQL as the admin role
+ssh root@49.12.253.93 'docker exec -i supabase-stage-db psql -X -U supabase_admin -d postgres -c "select count(*) from public.organization"'
+# Studio: tunnel the gateway, then open http://localhost:55321 (dashboard login in .env, DASHBOARD_USERNAME/PASSWORD)
+ssh -N -L 55321:127.0.0.1:55321 root@49.12.253.93
+# health
+ssh root@49.12.253.93 'cd /opt/sellton/supabase-stage && docker compose ps --format "{{.Name}} {{.Status}}"'
+```
+
+A change to `/opt/sellton/supabase-stage/.env` (Auth settings, SMTP, keys) takes effect with
+`docker compose up -d` in that folder (recreates what changed). Changing `JWT_SECRET` or the keys breaks every app
+that holds the old anon or service-role key: stage web, stage API, stage Gmail API, the backoffice.
+

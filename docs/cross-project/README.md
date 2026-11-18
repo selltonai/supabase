@@ -256,6 +256,176 @@ null and no `billing_customers.card_brand/card_last4` exists. The optional
 `onboarding_reengagement_sends` for per-workspace/step idempotency and honor
 `email_suppressions` before delivery.
 
+Migration `next-release/422_backoffice-cs-agent-core.sql` widens `audience_mode` with `chase` (workspaces in a
+customer-success stage, each email approved as a `cs_recommendations` row) and `segment` (a group of workspaces
+approved as one batch), and adds the nullable `email_sequence_steps.signup_source` (`web` | `mobile`; NULL = no
+filter) so a step can be kept to workspaces created on the web or on the phone. Existing rows are unchanged.
+
+### Backoffice Customer Success Tables
+
+| Table | Primary Writer | Primary Readers | Purpose |
+|-------|---------------|-----------------|---------|
+| **cs_threads** | backoffice | backoffice | A staff user's chat thread with the customer-success agent, about all workspaces or one |
+| **cs_messages** | backoffice | backoffice | The messages of a thread, with what the agent read to answer |
+| **cs_briefs** | backoffice | backoffice | The morning brief, one row per day and scope (`global` or a workspace) |
+| **cs_recommendations** | backoffice | backoffice | What the agent or a staff user proposes for a workspace, its approval, execution and outcome |
+| **cs_costs** | backoffice | backoffice | The backoffice's own model and data spend, one row per call; never invoiced |
+
+Migration `next-release/422_backoffice-cs-agent-core.sql` adds these five tables. They are additive, RLS is on with
+no policies, and `anon` and `authenticated` hold no privileges: only the service role reads or writes. No other
+service reads them. `cs_recommendations` holds a row in `approved`, `executed` or `failed` only with `approved_by`
+and `approved_at` set, and `dedupe_key` (unique when set) keeps a proposal single per workspace, kind and period.
+`cs_costs` is not the customers' ledger: the backoffice writes no row to `usage`, which stays Modal's. Deleting an
+organization deletes its threads, messages, briefs and proposals; its cost rows stay with `organization_id` NULL.
+The contract runs on a disposable database with `tests/run-backoffice-cs-agent-core-contract.sh`.
+
+| Function / column | Writer | Readers | Purpose |
+|-------|---------------|-----------------|---------|
+| **backoffice_cs_segment_inputs_v1()** | (read-only) | backoffice | One row per organization with `deleted = false`: the lifecycle classifier's inputs |
+| **backoffice_cs_workspace_facts_v1(p_org text)** | (read-only) | backoffice | One workspace's facts as one jsonb object (aggregates and the workspace's own data) |
+| **user_profiles.last_seen_at** | selltonai, later the mobile service (their releases) | backoffice | When the person was last seen in the workspace, written at most hourly |
+| **user_profiles.consent_marketing_at** | selltonai, later the mobile service (their releases) | backoffice | When the person agreed to marketing email; NULL = no consent |
+
+Migration `next-release/423_backoffice-cs-agent-facts.sql` adds the two functions and the two nullable columns
+(`user_profiles` has one row per person and workspace, so both are per workspace). Both functions are STABLE,
+SECURITY INVOKER, `search_path = public`, and executable by the service role only. The rollup reads each source
+table once, grouped by `organization_id`; the facts read filters every table by the workspace. The facts never hold
+a prospect's name, a prospect's email address or a reply body; `segment` and `health_score` are null (the backoffice
+computes them). A human action is a task completed or created by a member of the workspace (`user_organizations`),
+a play created, or a file uploaded: rows written as `api`, NULL or by a non-member (support staff) do not count.
+Nothing writes the two columns in 423; until a writer ships, every member reads as never seen and without consent.
+The backoffice builds the same rows from the tables while the functions are missing. The contract runs on a
+disposable database with `tests/run-backoffice-cs-agent-facts-contract.sh`.
+
+| Table | Primary Writer | Primary Readers | Purpose |
+|-------|---------------|-----------------|---------|
+| **workspace_plans** | backoffice | backoffice; selltonai-modal later (its billing release) | A workspace's commercial plan (`self_serve`, `pilot`, `deployment`) with the deal's own fee, included usage, term, seats and success criteria |
+| **workspace_price_overrides** | backoffice | backoffice; selltonai-modal later (its billing release) | A price per workspace, or per person for a seat, for a price-list item (`billing_settings` key), as `value_usd` or `percent` off |
+| **workspace_allowances** | backoffice | backoffice | A usage limit (amount, end time, or both) the backoffice enforces through the work-access override, with its 15-minute job's spend and claim |
+| **seat_discounts** | backoffice | backoffice; selltonai-modal later (its billing release) | A time-boxed percent off a seat (`mobile_seat`, `web_seat`), per workspace or per person; never on usage |
+| **trial_policies** | backoffice | backoffice | The trial policy per door and segment; every change is a row |
+| **discount_policies** | backoffice | backoffice | The seat-discount policy per door, segment and product; every change is a row |
+| **connection_ledger** | backoffice (nightly, correctable by staff) | backoffice | Which person held which provider account from when to when, and its monthly cost |
+| **workspace_company_profile** | backoffice | backoffice | The company data held per workspace, and the signals watchlist (`watch`, `watch_reason`) |
+| **cs_customer_signals** | backoffice | backoffice | A Brain signal on a watched company, one row per `brain_signal_id`, with the agent's grade and who handled it |
+| **cs_brain_cursor** | backoffice | backoffice | The backoffice's own place in the Brain's signals feed, one row per environment (not `brain_signal_cursor`) |
+
+Migration `next-release/427_backoffice-cs-agent-commercial.sql` adds these ten tables. They are additive, RLS is on
+with no policies, and `anon` and `authenticated` hold no privileges: only the service role reads or writes. No price
+value changes and no `billing_settings` row is written. A plan, price override, allowance or seat discount reaches
+`active` (or a later state) only with `approved_by` and `approved_at`; a policy row is `current` (or `superseded`)
+only with `confirmed_by` and `confirmed_at`, and `mode = 'auto'` or `autonomy_enabled` needs its default terms. The
+trial and discount caps are CHECKs on the rows. The seed is one current `trial_policies` row per door (`web`,
+`mobile`) and one `discount_policies` row for the phone seat, with caps and `mode = 'manual'` only: no default terms.
+At most one active plan and one active allowance per workspace, and one active seat discount per workspace, product
+and person. `dedupe_key` (unique when set) makes an insert single, as on `cs_recommendations`. Nothing outside the
+backoffice reads these tables until Modal's billing release, so nothing here changes what is billed. Deleting an
+organization deletes its rows; its `connection_ledger` rows stay with `organization_id` NULL. The contract runs on a
+disposable database with `tests/run-backoffice-cs-agent-commercial-contract.sh`.
+
+| Table | Primary Writer | Primary Readers | Purpose |
+|-------|---------------|-----------------|---------|
+| **workspace_deletions** | backoffice (the request and its own parts); selltonai-modal, the mobile service, the vector service and the gmail-api service each write only their own part's columns (their releases) | backoffice, and each of those services for its own part | A workspace archive or delete request, drained by every system for its part, and kept as the receipt |
+
+Migration `next-release/428_backoffice-cs-agent-deletion.sql` adds this table. It is additive, RLS is on with no
+policies, and `anon` and `authenticated` hold no privileges: only the service role reads or writes.
+`organization_id` is plain text with no foreign key, so the row outlives the organization it removed. `systems`
+lists the parts that apply (`supabase`, `pinecone`, `mongo`, `gmail_api`, `unipile`, `mobile`, `stripe`, `clerk`).
+A service claims a listed part by setting `<part>_claimed_at` and `<part>_claimed_by` where they are NULL (or the
+claim is stale), then writes `<part>_receipt`, a jsonb object with `status` `done`, `failed` or `skipped` and its
+counts and times; each part has its own columns, so services never overwrite each other's receipt. In `delete` mode
+no part is claimed before `purge_not_before` (at least 24 hours after `requested_at`). A request runs only once
+`confirmed_at` is set, and is `completed` only when every listed part is `done` or `skipped`. At most one open
+request (`pending`, `running`, `failed`) per organization. The contract runs on a disposable database with
+`tests/run-backoffice-cs-agent-deletion-contract.sh`.
+
+| Table | Primary Writer | Primary Readers | Purpose |
+|-------|---------------|-----------------|---------|
+| **workspace_economics** | backoffice (nightly) | backoffice | A workspace's (or one person's) revenue, costs, contribution and margin in one 4-week cycle, with the inputs they came from |
+
+Migration `next-release/430_backoffice-cs-agent-economics.sql` adds this table. It is additive, RLS is on with no
+policies, and `anon` and `authenticated` hold no privileges: only the service role reads or writes. One row per
+workspace (`user_id` NULL) and one per person (`user_id` set) for each cycle `[cycle_start, cycle_end)`: seat,
+workspace and usage revenue, the usage's original cost, the provider cost, the allocated infrastructure, the
+contribution and the margin percent, plus `inputs` (a jsonb object naming where each number came from) and
+`computed_at`. The backoffice computes every number; the table checks the arithmetic (`contribution_usd` is the
+revenue minus the costs, `margin_percent` is NULL without revenue) and that no revenue or cost is negative. Unique on
+(`organization_id`, coalesce(`user_id`, ''), `cycle_start`): `user_key` is that coalesce as a stored generated column,
+so the nightly upsert names `on_conflict=organization_id,user_key,cycle_start`; it is never written. Deleting an
+organization deletes its rows. `usage`, `billing_settings`, `billing_invoices`, `billing_credits` and
+`connection_ledger` are read to fill it and are not changed. The contract runs on a disposable database with
+`tests/run-backoffice-cs-agent-economics-contract.sh`.
+
+| Function | Writer | Readers | Purpose |
+|-------|---------------|-----------------|---------|
+| **backoffice_cs_segment_inputs_v1()** (as 432 redefines it) | (read-only) | backoffice | The rollup of 423; its trial columns read an active trial allowance as the trial |
+| **backoffice_cs_workspace_facts_v1(p_org text)** (as 432 redefines it) | (read-only) | backoffice | The facts of 423; `billing.trial_*` read the same trial, `billing.trial_source` says which row, `billing.paying` has one definition |
+
+Migration `next-release/432_backoffice-cs-agent-trial-facts.sql` replaces the two functions of 423 with the same
+signatures and return types (CREATE OR REPLACE); no table, column, index or row changes, and both stay STABLE,
+SECURITY INVOKER, `search_path = public`, service role only. A workspace's trial is its own trial while it runs (the
+web trial in `billing_customers`, or for a phone-first workspace the phone trial in `org_seats`), else an active
+`workspace_allowances` row of kind `trial` (427), else its own trial as recorded. A workspace is paying when
+`organization.web_billing_started_at` or `mobile_billing_started_at` is set, when `billing_customers.billing_started_at`
+is set with status `active` or `past_due`, or when an invoice was paid in the last 60 days. The backoffice applies
+the same definitions when it grants terms and reads either shape, so this file and the backoffice build can ship in
+either order. The rollback restores 423's definitions exactly. The contract runs on a disposable database with
+`tests/run-backoffice-cs-agent-trial-facts-contract.sh`.
+
+| Table | Primary Writer | Primary Readers | Purpose |
+|-------|---------------|-----------------|---------|
+| **cs_settings** | backoffice (a super admin, /cs/settings) | backoffice (the agent's model client) | Runtime settings of the customer-success agent, one row per key; first key `cs_llm_daily_usd_cap` |
+| **cs_settings_history** | the database (a trigger on cs_settings) | backoffice | Every insert, update and delete of a cs_settings row, append-only |
+
+Migration `next-release/433_backoffice-cs-agent-settings.sql` adds these two tables. They are additive, RLS is on with
+no policies, and `anon` and `authenticated` hold no table or function privileges: only the service role reads or
+writes. `cs_settings` has one row per `key` (`^[a-z][a-z0-9_]{0,79}$`) with a jsonb `value`, `updated_by` (the
+person's email, required), `updated_at` (set by the database on every write) and `reason`. The known key
+`cs_llm_daily_usd_cap` is a JSON number from 1 to 500: the agent's model spend cap per UTC day, in USD, over the
+backoffice's `CS_LLM_DAILY_USD_CAP`; the backoffice reads it at most once a minute. Nothing is seeded, so nothing
+changes until a super admin saves a value. A trigger writes every change to `cs_settings_history` (operation, old and
+new value, who, why, when), which refuses updates, deletes and truncate. The contract runs on a disposable database
+with `tests/run-backoffice-cs-agent-settings-contract.sh`.
+
+| Function | Writer | Readers | Purpose |
+|-------|---------------|-----------------|---------|
+| **backoffice_cs_workspace_facts_v1(p_org text)** (as 434 redefines it) | (read-only) | backoffice | The facts of 432 and a new top-level key `plan`: the workspace's active pilot or deployment (`workspace_plans`, 427), or null |
+
+Migration `next-release/434_backoffice-cs-agent-plan-facts.sql` replaces the facts function of 432 with the same
+signature and return type (CREATE OR REPLACE); no table, column, index or row changes, it stays STABLE, SECURITY
+INVOKER, `search_path = public`, service role only, and `backoffice_cs_segment_inputs_v1()` is not touched. Every key
+432 returns is unchanged. `plan` is the `workspace_plans` row with status `active` and plan `pilot` or `deployment`
+(an active `self_serve` plan, or a plan proposed, converted, ended or cancelled, is null): `kind`, `status`
+(`active`), `term_start` and `term_end` (dates), `term_days` (`term_end - term_start`), `days_elapsed` (UTC days since
+`term_start`, at least 0; null without dates), `fee_usd`, `included_usage_usd` and `seats_included` as stored, and
+`success_criteria`, the stored object's entries whose value is a number (any other stored shape reads as `{}`). The
+backoffice's playbook reads it (a pilot behind its success criteria past half its term, a deployment three quarters
+through its term) and reads a missing `plan` as no plan, so this file and the backoffice build can ship in either
+order. The rollback restores 432's definition exactly. The contract runs on a disposable database with
+`tests/run-backoffice-cs-agent-plan-facts-contract.sh`.
+
+| Table | Primary Writer | Primary Readers | Purpose |
+|-------|---------------|-----------------|---------|
+| **people_search_requests** | selltonai (play save route), selltonai-modal (closes it) | selltonai-modal (people_research_cron) | Roles added to a launched play: one row per save, the added titles only |
+| **people_search_request_companies** | selltonai-modal (people_research_cron) | selltonai-modal | One company of a request: the claim before the search is paid for, then its outcome |
+
+Migration `next-release/435_people-search-requests.sql` adds these two tables. They are additive, RLS is on with no
+policies, and `anon` and `authenticated` hold no privileges: only the service role reads or writes. The roles queue
+used to live in `campaigns.metadata.people_search_pending`, which other writers overwrote. A request is `pending`
+until Modal closes it as `done` (every company in `company_ids`, the play's approved companies when its first run
+started, has a row) or `excluded` (a play on the rep's existing connections, or a cancelled play). Modal claims a
+company by inserting its row; the primary key (`request_id`, `company_id`) makes the claim atomic, so no company is
+paid for twice. A release (spend limit, AI Ark unavailable) deletes the row. Counts are counted from the rows.
+
+Since `next-release/437_campaigns-play-own-targeting.sql` a request closes only when every company has a row with
+`done_at` set (searched, failed or skipped). A released company has no row, so the request stays `pending` and a later
+run takes the company again; a row with `done_at` NULL older than Modal's stale window (30 minutes, above the cron's
+900 s timeout) is a claim whose run died, and Modal deletes it so the company is taken again. A row with `done_at` set
+is never taken again. 437 also adds `campaigns.play_own_targeting text[]` (NULL means none): which of `job_titles`,
+`company_size` and `regions` a play with an ICP profile set for itself on the edit page. The app's save route writes
+it; Modal reads it, and reads the old `campaigns.metadata.play_own_targeting` key only while the column is NULL. The
+migration copies the existing metadata values into the column once; the app no longer writes the key.
+
 ---
 
 ## Schema Contracts

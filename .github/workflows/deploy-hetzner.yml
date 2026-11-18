@@ -25,7 +25,8 @@ jobs:
     environment:
       name: ${{ github.ref_name == 'main' && 'production' || 'stage' }}
     env:
-      HETZNER_SSH_HOST: ${{ vars.HETZNER_SSH_HOST || '46.224.151.84' }}
+      # Stage moved to supa-backoffice-stage (49.12.253.93) on 2026-11-09; production stays on 46.224.151.84.
+      HETZNER_SSH_HOST: ${{ vars.HETZNER_SSH_HOST || (github.ref_name == 'main' && '46.224.151.84' || '49.12.253.93') }}
       HETZNER_SSH_USER: ${{ vars.HETZNER_SSH_USER || 'root' }}
       HETZNER_MIGRATION_ACTOR: github-actions@${{ github.run_id }}
 

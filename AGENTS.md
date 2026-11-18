@@ -27,6 +27,26 @@
 
 ---
 
+## Stage servers (Hetzner)
+
+Stage Supabase runs on `supa-backoffice-stage` since 2026-11-09; production (`storagedb`) stays on `selltonai-main`.
+
+| Server | IP | Runs | Public name |
+|---|---|---|---|
+| `sellton-vercel-stage` | 2.28.196.242 | selltonai `stage` (`/var/www/selltonai`) | https://stage-ver.sellton.ai |
+| `selltonai-modal-stage` | 2.31.85.36 | selltonai-modal `stage` (`/opt/sellton-modal`) and selltonai-vector-api `stage` (`/opt/sellton-vector-api`, internal: `http://vector-api:8000`) | https://stage-mod.sellton.ai |
+| `supa-backoffice-stage` | 49.12.253.93 | Supabase stage, MongoDB stage, Gmail API stage (`/opt/sellton/...`) | https://supabase-stage.sellton.ai, https://gmail-api.sellton.ai |
+| `selltonai-main` | 46.224.151.84 | **production**: `storagedb`, `emailapi`, MongoDB, backoffice `portal` | never from a session |
+
+Connect: `SSH_AUTH_SOCK=~/.ssh/claude-agent.sock ssh -o BatchMode=yes root@<IP> '...'` (key `~/.ssh/hetzner-core`,
+loaded into that agent by a person: `ssh-agent -a ~/.ssh/claude-agent.sock`, then `ssh-add ~/.ssh/hetzner-core`).
+Rules: never print a secret (names with `cut -d= -f1`; set values from stdin); back up a file before editing it;
+nothing on 46.224.151.84; logs with `--tail` / `--since`, never whole.
+
+Stage database: **[operations/hetzner-migrations/README.md](operations/hetzner-migrations/README.md#stage-server-supa-backoffice-stage-491225393)**
+(layout, ports, Studio tunnel, read-only SQL). Migrations: `./operations/hetzner-migrations/migrate.sh status|plan|apply stage ...`
+(stage defaults to 49.12.253.93), or a push to `stage`.
+
 ## Typical Work
 
 - Schema migrations
