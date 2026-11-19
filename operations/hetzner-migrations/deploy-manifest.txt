@@ -105,3 +105,4 @@ migrations/next-release/440_close-usage-rollup-and-week-snapshot-to-browser-key.
 migrations/next-release/441_brain-signals-finished-plays-scope.sql
 migrations/next-release/445_gtm-strategy-play-own-connections.sql
 migrations/next-release/446_billing-v2-cycle-charges.sql
+migrations/next-release/447_signal-writer-usage-label.sql
