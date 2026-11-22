@@ -109,3 +109,4 @@ migrations/next-release/445_gtm-strategy-play-own-connections.sql
 migrations/next-release/446_billing-v2-cycle-charges.sql
 migrations/next-release/447_signal-writer-usage-label.sql
 migrations/next-release/448_kb-gaps.sql
+migrations/next-release/450_contacts-signal-hold.sql
