@@ -103,6 +103,9 @@ migrations/next-release/438_gtm-strategy-tables.sql
 migrations/next-release/439_customer-requests-trial-extension.sql
 migrations/next-release/440_close-usage-rollup-and-week-snapshot-to-browser-key.sql
 migrations/next-release/441_brain-signals-finished-plays-scope.sql
+migrations/next-release/442_engine-tables.sql
+migrations/next-release/443_workspace-switch.sql
+migrations/next-release/444_engine-state-tables.sql
 migrations/next-release/445_gtm-strategy-play-own-connections.sql
 migrations/next-release/446_billing-v2-cycle-charges.sql
 migrations/next-release/447_signal-writer-usage-label.sql
