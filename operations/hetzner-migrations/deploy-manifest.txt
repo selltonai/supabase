@@ -110,3 +110,4 @@ migrations/next-release/446_billing-v2-cycle-charges.sql
 migrations/next-release/447_signal-writer-usage-label.sql
 migrations/next-release/448_kb-gaps.sql
 migrations/next-release/450_contacts-signal-hold.sql
+migrations/next-release/451_customer-requests-switch-to-full.sql
