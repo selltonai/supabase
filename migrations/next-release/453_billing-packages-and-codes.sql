@@ -127,7 +127,7 @@ CREATE TABLE IF NOT EXISTS public.package_code_attempts (
   -- What was typed, upper-cased and cut to 200 characters.
   code_tried text,
   -- redeem_package_code's refusal: too_many_attempts, not_found, inactive, expired, used, email_mismatch,
-  -- archived, existing_cohort, already_activated_with_grant.
+  -- archived, existing_cohort, already_activated_with_grant, package_pending.
   reason text,
   created_at timestamptz NOT NULL DEFAULT now()
 );

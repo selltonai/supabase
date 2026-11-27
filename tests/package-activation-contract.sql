@@ -466,6 +466,66 @@ BEGIN
   RESET ROLE;
 END $$;
 
+-- 10b. One code per workspace: a second code waits while the first one's proposal is pending ------------------
+INSERT INTO public.organization (id, name) VALUES
+  ('org_two', 'Two codes'), ('org_two_ok', 'Two codes approved'), ('org_two_both', 'Two codes and a grant'),
+  ('org_two_other', 'Another at two.io');
+INSERT INTO public.package_codes (code, package_id, price_usd, email_domain, invoice_ref, expires_at, created_by)
+SELECT 'SELL-TWO-000' || g, CASE WHEN g IN (3, 4) THEN 'team' ELSE 'solo' END, CASE WHEN g IN (3, 4) THEN 4000 ELSE 500 END,
+       'two.io', 'INV-T' || g, now() + interval '30 days', 'staff@sellton.ai'
+  FROM generate_series(1, 7) g;
+
+DO $$
+DECLARE r jsonb; r1 jsonb; id1 uuid;
+BEGIN
+  r1 := public.redeem_package_code('SELL-TWO-0001', 'org_two', 'a@two.io', 'user_two');
+  PERFORM contract_fixture.check((r1->>'ok')::boolean, 'the first code: ' || r1::text);
+  r := public.redeem_package_code('SELL-TWO-0002', 'org_two', 'a@two.io', 'user_two');
+  PERFORM contract_fixture.check(r = '{"ok": false, "reason": "package_pending"}'::jsonb, 'a second code while pending: ' || r::text);
+  PERFORM contract_fixture.check(
+    (SELECT redeemed_at IS NULL FROM public.package_codes WHERE code = 'SELL-TWO-0002')
+    AND (SELECT count(*) FROM public.package_code_attempts
+          WHERE organization_id = 'org_two' AND reason = 'package_pending' AND code_tried = 'SELL-TWO-0002') = 1
+    AND (SELECT count(*) FROM public.cs_recommendations WHERE organization_id = 'org_two') = 1
+    AND (SELECT count(*) FROM public.activation_fees WHERE organization_id = 'org_two') = 1,
+    'package_pending: recorded, the second code unused, nothing else written');
+  -- The first code again is still a retry, not a refusal.
+  r := public.redeem_package_code('SELL-TWO-0001', 'org_two', 'a@two.io', 'user_two');
+  PERFORM contract_fixture.check((r->>'ok')::boolean AND (r->>'already_redeemed')::boolean
+                                 AND r->>'recommendation_id' = r1->>'recommendation_id', 'the first code retried: ' || r::text);
+  -- Another workspace is not held back by org_two's proposal.
+  r := public.redeem_package_code('SELL-TWO-0007', 'org_two_other', 'b@two.io', 'user_other');
+  PERFORM contract_fixture.check((r->>'ok')::boolean, 'another workspace: ' || r::text);
+
+  -- Dismissed in Today: the second code goes through, with its own proposal.
+  UPDATE public.cs_recommendations SET status = 'dismissed', dismissed_by = 'boss@sellton.ai', dismissed_at = now()
+   WHERE id = (r1->>'recommendation_id')::uuid;
+  r := public.redeem_package_code('SELL-TWO-0002', 'org_two', 'a@two.io', 'user_two');
+  PERFORM contract_fixture.check((r->>'ok')::boolean AND r->>'recommendation_id' <> r1->>'recommendation_id'
+    AND (SELECT count(*) FROM public.cs_recommendations WHERE organization_id = 'org_two' AND status = 'proposed') = 1,
+    'after a dismissal: ' || r::text);
+
+  -- Approved and granted (the backoffice's apply path): the rule as today, one grant at a time.
+  r1 := public.redeem_package_code('SELL-TWO-0003', 'org_two_ok', 'a@two.io', 'user_ok');
+  UPDATE public.cs_recommendations
+     SET status = 'executed', approved_by = 'boss@sellton.ai', approved_at = now(), executed_at = now()
+   WHERE id = (r1->>'recommendation_id')::uuid;
+  id1 := contract_fixture.allowance('org_two_ok', 'prepaid', 'Usage grant: Team · INV-T3', 2000);
+  r := public.redeem_package_code('SELL-TWO-0004', 'org_two_ok', 'a@two.io', 'user_ok');
+  PERFORM contract_fixture.check(r->>'reason' = 'already_activated_with_grant', 'after an approval: ' || r::text);
+  -- Once that grant has ended, a new code is accepted.
+  UPDATE public.workspace_allowances SET status = 'ended', ended_by = 'system:stripe_refund', ended_at = now() WHERE id = id1;
+  r := public.redeem_package_code('SELL-TWO-0004', 'org_two_ok', 'a@two.io', 'user_ok');
+  PERFORM contract_fixture.check((r->>'ok')::boolean, 'after the grant ended: ' || r::text);
+
+  -- The order: a running grant is named before a pending proposal.
+  r1 := public.redeem_package_code('SELL-TWO-0005', 'org_two_both', 'a@two.io', 'user_both');
+  PERFORM contract_fixture.allowance('org_two_both', 'goodwill', 'Usage grant: goodwill', 20);
+  r := public.redeem_package_code('SELL-TWO-0006', 'org_two_both', 'a@two.io', 'user_both');
+  PERFORM contract_fixture.check(r->>'reason' = 'already_activated_with_grant',
+                                 'already_activated_with_grant before package_pending: ' || r::text);
+END $$;
+
 DO $$
 DECLARE r jsonb; a record; id1 uuid;
 BEGIN

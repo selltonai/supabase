@@ -27,7 +27,7 @@
 --              redeem_package_code -> {ok: true, recommendation_id, blocked, package_id, grant_usd,
 --                validity_days[, already_redeemed]} or {ok: false, reason}; reason too_many_attempts | not_found |
 --                inactive | expired | used | email_mismatch | archived | existing_cohort |
---                already_activated_with_grant.
+--                already_activated_with_grant | package_pending (another code's proposal is still proposed).
 --              end_package_grant_for_payment -> {status, allowance_id, amount_usd}; status ended | reduced |
 --                not_found | unchanged. p_refunded_cents is the charge's refunded total so far (Stripe's
 --                amount_refunded), p_amount_cents the charge amount.
@@ -262,6 +262,11 @@ BEGIN
     ELSIF EXISTS (SELECT 1 FROM public.workspace_allowances
                    WHERE organization_id = p_org_id AND status = 'active' AND starts_with(reason, 'Usage grant: ')) THEN
       v_reason := 'already_activated_with_grant';
+    ELSIF EXISTS (SELECT 1 FROM public.cs_recommendations
+                   WHERE organization_id = p_org_id AND status = 'proposed'
+                     AND starts_with(dedupe_key, 'package_code:')) THEN
+      -- One code per workspace (B14): an earlier code's proposal still waits for approval or dismissal.
+      v_reason := 'package_pending';
     END IF;
   END IF;
 
