@@ -112,3 +112,6 @@ migrations/next-release/448_kb-gaps.sql
 migrations/next-release/450_contacts-signal-hold.sql
 migrations/next-release/451_customer-requests-switch-to-full.sql
 migrations/next-release/452_deal-hold-and-aged-close.sql
+migrations/next-release/453_billing-packages-and-codes.sql
+migrations/next-release/454_package-activation-functions.sql
+migrations/next-release/455_billing-customers-invoice-run-claim.sql
